@@ -25,7 +25,6 @@ from darts.models.forecasting.torch_forecasting_model import (
 )
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 
-
 class CustomBlockRNNModule(EngressionPLModule, ABC):
     def __init__(
         self,
@@ -43,7 +42,7 @@ class CustomBlockRNNModule(EngressionPLModule, ABC):
         num_samples: int = 20,
         **kwargs,
     ):
-        """This class allows to create custom block RNN modules that can later be used with Darts'
+        """This class allows to create custom block EnRNN (Engression-enhanced RNN) modules that can later be used with Darts'
         :class:`BlockRNNModel`. It adds the backbone that is required to be used with Darts'
         :class:`TorchForecastingModel` and :class:`BlockRNNModel`.
 
@@ -59,10 +58,17 @@ class CustomBlockRNNModule(EngressionPLModule, ABC):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_size
             The dimensionality of the input time series.
         hidden_dim
-            The number of features in the hidden state `h` of the RNN module.
+            The number of features in the hidden state `h` of the EnRNN (Engression-enhanced RNN) module.
         future_cov_dim
             Number of future covariates.
         num_layers
@@ -73,9 +79,9 @@ class CustomBlockRNNModule(EngressionPLModule, ABC):
             The number of parameters of the likelihood (or 1 if no likelihood is used).
         num_layers_out_fc
             A list containing the dimensions of the hidden layers of the fully connected NN.
-            This network connects the last hidden layer of the PyTorch RNN module to the output.
+            This network connects the last hidden layer of the PyTorch EnRNN (Engression-enhanced RNN) module to the output.
         dropout
-            The fraction of neurons that are dropped in all-but-last RNN layers.
+            The fraction of neurons that are dropped in all-but-last EnRNN (Engression-enhanced RNN) layers.
         activation
             The name of the activation function to be applied between the layers of the fully connected network.
         **kwargs
@@ -103,10 +109,17 @@ class CustomBlockRNNModule(EngressionPLModule, ABC):
     @io_processor
     @abstractmethod
     def forward(self, x_in: PLModuleInput) -> torch.Tensor:
-        """BlockRNN Module forward.
+        """EnBlockRNN (Engression-enhanced BlockRNN) Module forward.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             Tuple of Tensors containing the features of the input sequence. The tuple has elements
             (past target, historic future covariates, future covariates, static covariates).
@@ -115,10 +128,9 @@ class CustomBlockRNNModule(EngressionPLModule, ABC):
         Returns
         -------
         torch.Tensor
-            The BlockRNN output Tensor with shape `(batch_size, output_chunk_length, target_size, nr_params)`.
+            The EnBlockRNN (Engression-enhanced BlockRNN) output Tensor with shape `(batch_size, output_chunk_length, target_size, nr_params)`.
             It contains the prediction at the last time step of the sequence.
         """
-
 
 # TODO add batch norm
 class _EnBlockRNNModule(CustomBlockRNNModule):
@@ -131,15 +143,15 @@ class _EnBlockRNNModule(CustomBlockRNNModule):
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing a block RNN to be used in `BlockRNNModel`.
+        """PyTorch module implementing a block EnRNN (Engression-enhanced RNN) to be used in `BlockRNNModel`.
 
-        PyTorch module implementing a simple block RNN with the specified `name` layer.
-        This module combines a PyTorch RNN module, together with a fully connected network, which maps the
+        PyTorch module implementing a simple block EnRNN (Engression-enhanced RNN) with the specified `name` layer.
+        This module combines a PyTorch EnRNN (Engression-enhanced RNN) module, together with a fully connected network, which maps the
         last hidden layers to output of the desired size `output_chunk_length` and makes it compatible with
         `BlockRNNModel`s.
 
-        This module uses an RNN to encode the input sequence, and subsequently uses a fully connected
-        network as the decoder which takes as input the last hidden state of the encoder RNN.
+        This module uses an EnRNN (Engression-enhanced RNN) to encode the input sequence, and subsequently uses a fully connected
+        network as the decoder which takes as input the last hidden state of the encoder EnRNN (Engression-enhanced RNN).
         Optionally, a non-linear activation function can be applied between the layers of the fully connected network.
         The final output of the decoder is a sequence of length `output_chunk_length`. In this sense,
         the `_BlockRNNModule` produces 'blocks' of forecasts at a time (which is different
@@ -147,8 +159,15 @@ class _EnBlockRNNModule(CustomBlockRNNModule):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         name
-            The name of the specific PyTorch RNN module ("RNN", "GRU" or "LSTM").
+            The name of the specific PyTorch EnRNN (Engression-enhanced RNN) module ("EnRNN (Engression-enhanced RNN)", "GRU" or "LSTM").
         activation
             The name of the activation function to be applied between the layers of the fully connected network.
             Options include "ReLU", "Sigmoid", "Tanh", or None for no activation. Default: None.
@@ -274,7 +293,6 @@ class _EnBlockRNNModule(CustomBlockRNNModule):
         )
         return predictions
 
-
 class EnBlockRNNModel(MixedCovariatesTorchModel):
     def __init__(
         self,
@@ -295,14 +313,14 @@ class EnBlockRNNModel(MixedCovariatesTorchModel):
     ):
         """Block Recurrent Neural Network Model (RNNs).
 
-        This is a neural network model that uses an RNN encoder to encode fixed-length input chunks, and
+        This is a neural network model that uses an EnRNN (Engression-enhanced RNN) encoder to encode fixed-length input chunks, and
         a fully connected network to produce fixed-length outputs.
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time).
 
         This class provides three variants of RNNs:
 
-        * Vanilla RNN
+        * Vanilla EnRNN (Engression-enhanced RNN)
 
         * LSTM
 
@@ -310,6 +328,13 @@ class EnBlockRNNModel(MixedCovariatesTorchModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -328,15 +353,15 @@ class EnBlockRNNModel(MixedCovariatesTorchModel):
             `output_chunk_shift` steps after the end of the target `series`. If `output_chunk_shift` is set, the model
             cannot generate autoregressive predictions (`n > output_chunk_length`).
         model
-            Either a string specifying the RNN module type ("RNN", "LSTM" or "GRU"), or a subclass of
+            Either a string specifying the EnRNN (Engression-enhanced RNN) module type ("EnRNN (Engression-enhanced RNN)", "LSTM" or "GRU"), or a subclass of
             :class:`CustomBlockRNNModule` (the class itself, not an object of the class) with a custom logic.
         hidden_dim
-            Size for feature maps for each hidden RNN layer (:math:`h_n`).
+            Size for feature maps for each hidden EnRNN (Engression-enhanced RNN) layer (:math:`h_n`).
             In Darts version <= 0.21, hidden_dim was referred as hidden_size.
         n_rnn_layers
-            Number of layers in the RNN module.
+            Number of layers in the EnRNN (Engression-enhanced RNN) module.
         hidden_fc_sizes
-            Sizes of hidden layers connecting the last hidden layer of the RNN module to the output, if any.
+            Sizes of hidden layers connecting the last hidden layer of the EnRNN (Engression-enhanced RNN) module to the output, if any.
         dropout
             Fraction of neurons affected by Dropout.
         activation
@@ -524,7 +549,7 @@ class EnBlockRNNModel(MixedCovariatesTorchModel):
          [5.22497681]]
 
         .. note::
-            `RNN example notebook <https://unit8co.github.io/darts/examples/04-RNN-examples.html>`__ presents techniques
+            `EnRNN (Engression-enhanced RNN) example notebook <https://unit8co.github.io/darts/examples/04-EnRNN (Engression-enhanced RNN)-examples.html>`__ presents techniques
             that can be used to improve the forecasts quality compared to this simple usage example.
         """
         kwargs.setdefault("likelihood", None)

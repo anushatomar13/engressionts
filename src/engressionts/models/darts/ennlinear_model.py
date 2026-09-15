@@ -1,301 +1,231 @@
 """
-Temporal Convolutional Network
-------------------------------
+N-Linear
+--------
 """
-
-import math
-from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from darts import TimeSeries
-from darts.logging import get_logger, raise_log
-from darts.models.forecasting.pl_forecasting_module import io_processor
-from darts.models.forecasting.torch_forecasting_model import PastCovariatesTorchModel
-from darts.utils.data import ShiftedTorchTrainingDataset, TorchTrainingDataset
-from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
-from darts.utils.torch import MonteCarloDropout
-
+from darts.logging import raise_log
+from darts.models.forecasting.pl_forecasting_module import (
+    io_processor,
+)
+from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel
 from engressionts.base.base_engression import EngressionPLModule
+from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 
-logger = get_logger(__name__)
+class _EnNLinearModule(EngressionPLModule):
+    """
+    EnNLinear (Engression-enhanced NLinear) module
+    """
 
-
-class _ResidualBlock(nn.Module):
     def __init__(
         self,
-        num_filters: int,
-        kernel_size: int,
-        dilation_base: int,
-        dropout: float,
-        weight_norm: bool,
-        nr_blocks_below: int,
-        num_layers: int,
-        input_size: int,
-        target_size: int,
-    ):
-        """PyTorch module implementing a residual block module used in `_TCNModule`.
-
-        Parameters
-        ----------
-        num_filters
-            The number of filters in a convolutional layer of the TCN.
-        kernel_size
-            The size of every kernel in a convolutional layer.
-        dilation_base
-            The base of the exponent that will determine the dilation on every level.
-        dropout
-            The dropout to be applied to every convolutional layer.
-        weight_norm
-            Boolean value indicating whether to use weight normalization.
-        nr_blocks_below
-            The number of residual blocks before the current one.
-        num_layers
-            The number of convolutional layers.
-        input_size
-            The dimensionality of the input time series of the whole network.
-        target_size
-            The dimensionality of the output time series of the whole network.
-
-        Inputs
-        ------
-        x of shape `(batch_size, in_dimension, input_chunk_length)`
-            Tensor containing the features of the input sequence.
-            in_dimension is equal to `input_size` if this is the first residual block,
-            in all other cases it is equal to `num_filters`.
-
-        Outputs
-        -------
-        y of shape `(batch_size, out_dimension, input_chunk_length)`
-            Tensor containing the output sequence of the residual block.
-            out_dimension is equal to `output_size` if this is the last residual block,
-            in all other cases it is equal to `num_filters`.
-        """
-        super().__init__()
-
-        self.dilation_base = dilation_base
-        self.kernel_size = kernel_size
-        self.dropout1 = MonteCarloDropout(dropout)
-        self.dropout2 = MonteCarloDropout(dropout)
-        self.num_layers = num_layers
-        self.nr_blocks_below = nr_blocks_below
-
-        input_dim = input_size if nr_blocks_below == 0 else num_filters
-        output_dim = target_size if nr_blocks_below == num_layers - 1 else num_filters
-        self.conv1 = nn.Conv1d(
-            input_dim,
-            num_filters,
-            kernel_size,
-            dilation=(dilation_base**nr_blocks_below),
-        )
-        self.conv2 = nn.Conv1d(
-            num_filters,
-            output_dim,
-            kernel_size,
-            dilation=(dilation_base**nr_blocks_below),
-        )
-        if weight_norm:
-            self.conv1, self.conv2 = (
-                nn.utils.parametrizations.weight_norm(self.conv1),
-                nn.utils.parametrizations.weight_norm(self.conv2),
-            )
-
-        if input_dim != output_dim:
-            self.conv3 = nn.Conv1d(input_dim, output_dim, 1)
-
-    def forward(self, x):
-        residual = x
-
-        # first step
-        left_padding = (self.dilation_base**self.nr_blocks_below) * (
-            self.kernel_size - 1
-        )
-        x = F.pad(x, (left_padding, 0))
-        x = self.dropout1(F.relu(self.conv1(x)))
-
-        # second step
-        x = F.pad(x, (left_padding, 0))
-        x = self.conv2(x)
-        if self.nr_blocks_below < self.num_layers - 1:
-            x = F.relu(x)
-        x = self.dropout2(x)
-
-        # add residual
-        if self.conv1.in_channels != self.conv2.out_channels:
-            residual = self.conv3(residual)
-        x = x + residual
-
-        return x
-
-
-class _EnTCNModule(EngressionPLModule):
-    def __init__(
-        self,
-        input_size: int,
-        kernel_size: int,
-        num_filters: int,
-        num_layers: int | None,
-        dilation_base: int,
-        weight_norm: bool,
-        target_size: int,
+        input_dim: int,
+        output_dim: int,
+        future_cov_dim: int,
+        static_cov_dim: int,
         nr_params: int,
-        target_length: int,
-        dropout: float,
+        shared_weights: bool,
+        const_init: bool,
+        normalize: bool,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing a dilated TCN module used in `TCNModel`.
-
+        """PyTorch module implementing the N-HiTS architecture.
 
         Parameters
         ----------
-        input_size
-            The dimensionality of the input time series.
-        target_size
-            The dimensionality of the output time series.
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
+        input_dim
+            The number of input components (target + optional covariate)
+        output_dim
+            Number of output components in the target
+        future_cov_dim
+            Number of components in the future covariates
+        static_cov_dim
+            Dimensionality of the static covariates (either component-specific or shared)
         nr_params
             The number of parameters of the likelihood (or 1 if no likelihood is used).
-        target_length
-            Number of time steps the torch module will predict into the future at once.
-        kernel_size
-            The size of every kernel in a convolutional layer.
-        num_filters
-            The number of filters in a convolutional layer of the TCN.
-        num_layers
-            The number of convolutional layers.
-        weight_norm
-            Boolean value indicating whether to use weight normalization.
-        dilation_base
-            The base of the exponent that will determine the dilation on every level.
-        dropout
-            The dropout rate for every convolutional layer.
+        shared_weights
+            Whether to use shared weights for the components of the series.
+            ** Ignores covariates when True. **
+        const_init
+            Whether to initialize the weights to 1/in_len
+        normalize
+            Whether to apply the "normalization" described in the paper.
+
         **kwargs
             all parameters required for :class:`darts.models.forecasting.pl_forecasting_module.PLForecastingModule`
             base class.
 
         Inputs
         ------
-        x of shape `(batch_size, input_chunk_length, input_size)`
-            Tensor containing the features of the input sequence.
+        x of shape `(batch_size, input_chunk_length)`
+            Tensor containing the input sequence.
 
         Outputs
         -------
-        y of shape `(batch_size, input_chunk_length, target_size, nr_params)`
-            Tensor containing the predictions of the next 'output_chunk_length' points in the last
-            'output_chunk_length' entries of the tensor. The entries before contain the data points
-            leading up to the first prediction, all in chronological order.
-        """
+        y of shape `(batch_size, output_chunk_length, target_size/output_dim, nr_params)`
+            Tensor containing the output of the EnBEATS (Engression-enhanced N-BEATS) module.
 
+        """
         super().__init__(
             noise_std=noise_std,
             noise_type=noise_type,
             num_samples=num_samples,
             **kwargs,
         )
-
-        # Defining parameters
-        self.input_size = input_size
-        self.n_filters = num_filters
-        self.kernel_size = kernel_size
-        self.target_length = target_length
-        self.target_size = target_size
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.future_cov_dim = future_cov_dim
+        self.static_cov_dim = static_cov_dim
         self.nr_params = nr_params
-        self.dilation_base = dilation_base
+        self.shared_weights = shared_weights
+        self.const_init = const_init
+        self.normalize = normalize
 
-        # If num_layers is not passed, compute number of layers needed for full history coverage
-        if num_layers is None and dilation_base > 1:
-            num_layers = math.ceil(
-                math.log(
-                    (self.input_chunk_length - 1)
-                    * (dilation_base - 1)
-                    / (kernel_size - 1)
-                    / 2
-                    + 1,
-                    dilation_base,
+        def _create_linear_layer(in_dim, out_dim):
+            layer = nn.Linear(in_dim, out_dim)
+            if self.const_init:
+                layer.weight = nn.Parameter(
+                    (1.0 / in_dim) * torch.ones(layer.weight.shape)
                 )
-            )
-            logger.info("Number of layers chosen: " + str(num_layers))
-        elif num_layers is None:
-            num_layers = math.ceil(
-                (self.input_chunk_length - 1) / (kernel_size - 1) / 2
-            )
-            logger.info("Number of layers chosen: " + str(num_layers))
-        self.num_layers = num_layers
+            return layer
 
-        # Building TCN module
-        self.res_blocks_list = []
-        for i in range(num_layers):
-            res_block = _ResidualBlock(
-                num_filters=num_filters,
-                kernel_size=kernel_size,
-                dilation_base=dilation_base,
-                dropout=dropout,
-                weight_norm=weight_norm,
-                nr_blocks_below=i,
-                num_layers=num_layers,
-                input_size=self.input_size,
-                target_size=target_size * nr_params,
+        if self.shared_weights:
+            layer_in_dim = self.input_chunk_length
+            layer_out_dim = self.output_chunk_length * self.nr_params
+        else:
+            layer_in_dim = self.input_chunk_length * self.input_dim
+            layer_out_dim = self.output_chunk_length * self.output_dim * self.nr_params
+
+        self.layer = _create_linear_layer(layer_in_dim, layer_out_dim)
+
+        if self.future_cov_dim != 0:
+            # future covariates layer acts on time steps independently
+            self.linear_fut_cov = _create_linear_layer(
+                self.future_cov_dim, self.output_dim * self.nr_params
             )
-            self.res_blocks_list.append(res_block)
-        self.res_blocks = nn.ModuleList(self.res_blocks_list)
+        if self.static_cov_dim != 0:
+            self.linear_static_cov = _create_linear_layer(
+                self.static_cov_dim, layer_out_dim
+            )
 
     @io_processor
     def forward(self, x_in: PLModuleInput):
-        x = x_in[0]
-
+        """
+        x_in
+            comes as tuple `(x, x_future, x_static, future_target)` where `x` is the past target, past covariates and
+            historic future covariate chunk and `x_future` is the (non-historic) future chunk.
+            Input dimensions are `(n_samples, n_time_steps, n_variables)`
+        """
+        x, x_future, x_static = x_in[:3]  # x: (batch, in_len, in_dim)
         x = self.noise_layer(x)
-        # data is of size (batch_size, input_chunk_length, input_size)
-        batch_size = x.size(0)
-        x = x.transpose(1, 2)
+        # we clone `x`, to avoid value mutation from normalization when performing auto-regression
+        x = x.clone()
+        batch, _, _ = x.shape
+        seq_last = None
 
-        for res_block in self.res_blocks_list:
-            x = res_block(x)
+        if self.shared_weights:
+            # discard covariates, to ensure that in_dim == out_dim
+            x = x[:, :, : self.output_dim]
+            x = x.permute(0, 2, 1)  # (batch, out_dim, in_len)
 
-        x = x.transpose(1, 2)
-        x = x.view(
-            batch_size, self.input_chunk_length, self.target_size, self.nr_params
-        )
+            if self.normalize:
+                seq_last = x[:, :, -1:].detach().clone()  # (batch, out_dim, 1)
+                x = x - seq_last
+
+            x = self.layer(x)  # (batch, out_dim, out_len * nr_params)
+
+            if self.normalize:
+                x = x + seq_last
+
+            # extract nr_params
+            x = x.view(batch, self.output_dim, self.output_chunk_length, self.nr_params)
+
+            # permute back to (batch, out_len, out_dim, nr_params)
+            x = x.permute(0, 2, 1, 3)
+        else:
+            if self.normalize:
+                # get last values for all x but not future covariates
+                past_dim = self.input_dim - self.future_cov_dim
+                seq_last = x[:, -1:, :past_dim].detach().clone()
+                # normalize the input
+                x[:, :, :past_dim] -= seq_last
+
+            x = self.layer(x.view(batch, -1))  # (batch, out_len * out_dim * nr_params)
+            x = x.view(
+                batch, self.output_chunk_length, self.output_dim * self.nr_params
+            )
+
+            if self.future_cov_dim != 0:
+                # x_future might be shorter than output_chunk_length when n < output_chunk_length
+                # so we need to pad it with zeros at the end to match the output_chunk_length
+                x_future = torch.nn.functional.pad(
+                    input=x_future,
+                    pad=(0, 0, 0, self.output_chunk_length - x_future.shape[1]),
+                    mode="constant",
+                    value=0,
+                )
+
+                fut_cov_output = self.linear_fut_cov(x_future)
+                x = x + fut_cov_output.view(
+                    batch, self.output_chunk_length, self.output_dim * self.nr_params
+                )
+
+            if self.static_cov_dim != 0:
+                static_cov_output = self.linear_static_cov(x_static.reshape(batch, -1))
+                x = x + static_cov_output.view(
+                    batch, self.output_chunk_length, self.output_dim * self.nr_params
+                )
+
+            if self.normalize:
+                # Reverse the normalization for the target
+                x = x + seq_last[:, :, : self.output_dim]
+
+            x = x.view(batch, self.output_chunk_length, self.output_dim, self.nr_params)
 
         return x
 
-    @property
-    def first_prediction_index(self) -> int:
-        return -self.output_chunk_length
-
-
-class EnTCNModel(PastCovariatesTorchModel):
-    @property
-    def supports_probabilistic_prediction(self) -> bool:
-        return True
-
+class EnNLinearModel(MixedCovariatesTorchModel):
     def __init__(
         self,
         input_chunk_length: int,
         output_chunk_length: int,
         output_chunk_shift: int = 0,
-        kernel_size: int = 3,
-        num_filters: int = 3,
-        num_layers: int | None = None,
-        dilation_base: int = 2,
-        weight_norm: bool = False,
-        dropout: float = 0.2,
+        shared_weights: bool = False,
+        const_init: bool = True,
+        normalize: bool = True,
+        use_static_covariates: bool = True,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
         num_samples: int = 20,
         **kwargs,
     ):
-        """Temporal Convolutional Network Model (TCN).
+        """An implementation of the EnNLinear (Engression-enhanced NLinear) model, as presented in [1]_.
 
-        This is an implementation of a dilated TCN used for forecasting, inspired from [1]_.
-
-        This model supports past covariates (known for `input_chunk_length` points before prediction time).
+        This implementation is improved by allowing the optional use of past covariates (known for
+        `input_chunk_length` points before prediction time), future covariates (known for `output_chunk_length`
+        points after prediction time) and static covariates, as well as supporting probabilistic forecasting.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -313,20 +243,33 @@ class EnTCNModel(PastCovariatesTorchModel):
             `future_covariates`, the future values are extracted from the shifted output chunk. Predictions will start
             `output_chunk_shift` steps after the end of the target `series`. If `output_chunk_shift` is set, the model
             cannot generate autoregressive predictions (`n > output_chunk_length`).
-        kernel_size
-            The size of every kernel in a convolutional layer.
-        num_filters
-            The number of filters in a convolutional layer of the TCN.
-        weight_norm
-            Boolean value indicating whether to use weight normalization.
-        dilation_base
-            The base of the exponent that will determine the dilation on every level.
-        num_layers
-            The number of convolutional layers.
-        dropout
-            The dropout rate for every convolutional layer. This is compatible with Monte Carlo dropout
-            at inference time for model uncertainty estimation (enabled with ``mc_dropout=True`` at
-            prediction time).
+        shared_weights
+            Whether to use shared weights for all components of multivariate series.
+
+            .. warning::
+                When set to True, covariates will be ignored as a 1-to-1 mapping is
+                required between input dimensions and output dimensions.
+            ..
+
+            Default: False.
+
+        const_init
+            Whether to initialize the weights to 1/in_len. If False, the default PyTorch
+            initialization is used (default='True').
+        normalize
+            Whether to apply the simple "normalization" proposed in the paper, which consists
+            in subtracting the last value of the input sequence from the input sequence. This is applied for the target
+            series and past covariates, but not future covariates because it would defeat the use of encoders (see
+            `add_encoders`). Without normalization, the models behaves like the simple Linear model proposed in the
+            paper. Default: True.
+
+            .. note::
+                This cannot be applied to probabilistic models.
+            ..
+        use_static_covariates
+            Whether the model should use static covariate information in case the input `series` passed to ``fit()``
+            contain static covariates. If ``True``, and static covariates are available at fitting time, will enforce
+            that all target `series` have the same static covariate dimensionality in ``fit()`` and ``predict()``.
         **kwargs
             Optional arguments to initialize the pytorch_lightning.Module, pytorch_lightning.Trainer, and
             Darts' :class:`TorchForecastingModel`.
@@ -345,7 +288,7 @@ class EnTCNModel(PastCovariatesTorchModel):
             The PyTorch optimizer class to be used. Default: ``torch.optim.Adam``.
         optimizer_kwargs
             Optionally, some keyword arguments for the PyTorch optimizer (e.g., ``{'lr': 1e-3}``
-            for specifying a learning rate). Otherwise the default values of the selected ``optimizer_cls``
+            for specifying a learning rate). Otherwise, the default values of the selected ``optimizer_cls``
             will be used. Default: ``None``.
         lr_scheduler_cls
             Optionally, the PyTorch learning rate scheduler class to be used. Specifying ``None`` corresponds
@@ -421,7 +364,6 @@ class EnTCNModel(PastCovariatesTorchModel):
             supported kwargs. Default: ``None``.
             Running on GPU(s) is also possible using ``pl_trainer_kwargs`` by specifying keys ``"accelerator",
             "devices", and "auto_select_gpus"``. Some examples for setting the devices inside the ``pl_trainer_kwargs``
-            dict:rgs``
             dict:
 
             - ``{"accelerator": "cpu"}`` for CPU,
@@ -476,113 +418,120 @@ class EnTCNModel(PastCovariatesTorchModel):
 
         References
         ----------
-        .. [1] https://arxiv.org/abs/1803.01271
+        .. [1] Zeng, A., Chen, M., Zhang, L., & Xu, Q. (2022).
+               Are Transformers Effective for Time Series Forecasting?. arXiv preprint arXiv:2205.13504.
         .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
                 Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------
         >>> from darts.datasets import WeatherDataset
-        >>> from darts.models import TCNModel
+        >>> from darts.models import NLinearModel
         >>> series = WeatherDataset().load()
         >>> # predicting atmospheric pressure
         >>> target = series['p (mbar)'][:100]
         >>> # optionally, use past observed rainfall (pretending to be unknown beyond index 100)
         >>> past_cov = series['rain (mm)'][:100]
-        >>> # `output_chunk_length` must be strictly smaller than `input_chunk_length`
-        >>> model = TCNModel(
-        >>>     input_chunk_length=12,
+        >>> # optionally, use future temperatures (pretending this component is a forecast)
+        >>> future_cov = series['T (degC)'][:106]
+        >>> # predict 6 pressure values using the 12 past values of pressure and rainfall, as well as the 6 temperature
+        >>> # values corresponding to the forecasted period
+        >>> model = NLinearModel(
+        >>>     input_chunk_length=6,
         >>>     output_chunk_length=6,
         >>>     n_epochs=20,
         >>> )
-        >>> model.fit(target, past_covariates=past_cov)
+        >>> model.fit(target, past_covariates=past_cov, future_covariates=future_cov)
         >>> pred = model.predict(6)
         >>> print(pred.values())
-        [[-80.48476824]
-         [-80.47896667]
-         [-41.77135603]
-         [-41.76158729]
-         [-41.76854107]
-         [-41.78166819]]
-
-        .. note::
-            `DeepTCN example notebook <https://unit8co.github.io/darts/examples/09-DeepTCN-examples.html>`__ presents
-            techniques that can be used to improve the forecasts quality compared to this simple usage example.
+        [[429.56117169]
+         [428.93264096]
+         [428.35210616]
+         [428.13154426]
+         [427.98781641]
+         [428.00325481]]
         """
-
-        if kernel_size >= input_chunk_length:
-            raise_log(
-                ValueError(
-                    "The kernel size must be strictly smaller than the input length."
-                ),
-            )
-        if output_chunk_length >= input_chunk_length:
-            raise_log(
-                ValueError(
-                    "The output length must be strictly smaller than the input length."
-                ),
-            )
-
+        kwargs.setdefault("likelihood", None)
         super().__init__(**self._extract_torch_model_params(**self.model_params))
 
         # extract pytorch lightning module kwargs
         self.pl_module_params = self._extract_pl_module_params(**self.model_params)
 
-        self.kernel_size = kernel_size
-        self.num_filters = num_filters
-        self.num_layers = num_layers
-        self.dilation_base = dilation_base
-        self.dropout = dropout
-        self.weight_norm = weight_norm
-        
+        self.shared_weights = shared_weights
+        self.const_init = const_init
+        self.normalize = normalize
+        self._considers_static_covariates = use_static_covariates
+
         self.noise_std = noise_std
         self.noise_type = noise_type
         self.num_samples = num_samples
 
+        if (
+            "likelihood" in self.model_params
+            and self.model_params["likelihood"] is not None
+            and self.normalize
+        ):
+            raise_log(
+                ValueError(
+                    "normalize = True cannot be used with probabilistic NLinearModel."
+                ),
+            )
+
     def _create_model(self, train_sample: TorchTrainingSample) -> torch.nn.Module:
         # samples are made of (past target, past cov, historic future cov, future cov, static cov, future_target)
-        (past_target, past_covariates, _, _, _, _) = train_sample
-        input_dim = past_target.shape[1] + (
-            past_covariates.shape[1] if past_covariates is not None else 0
+        (past_target, past_covariates, _, future_covariates, static_covariates, _) = (
+            train_sample
         )
+
+        input_dim = past_target.shape[1] + sum(
+            # add past covariates dim and historic future covariates dim, if present
+            cov.shape[1] if cov is not None else 0
+            for cov in (past_covariates, future_covariates)
+        )
+        future_cov_dim = (
+            future_covariates.shape[1] if future_covariates is not None else 0
+        )
+
+        if static_covariates is None:
+            static_cov_dim = 0
+        else:
+            # account for component-specific or shared static covariates representation
+            static_cov_dim = static_covariates.shape[0] * static_covariates.shape[1]
+
         output_dim = past_target.shape[1]
+
         nr_params = 1 if self.likelihood is None else self.likelihood.num_parameters
 
-        return _EnTCNModule(
-            input_size=input_dim,
-            target_size=output_dim,
+        return _EnNLinearModule(
+            input_dim=input_dim,
+            output_dim=output_dim,
+            future_cov_dim=future_cov_dim,
+            static_cov_dim=static_cov_dim,
             nr_params=nr_params,
-            kernel_size=self.kernel_size,
-            num_filters=self.num_filters,
-            num_layers=self.num_layers,
-            dilation_base=self.dilation_base,
-            target_length=self.output_chunk_length,
-            dropout=self.dropout,
-            weight_norm=self.weight_norm,
+            shared_weights=self.shared_weights,
+            const_init=self.const_init,
+            normalize=self.normalize,
             noise_std=self.noise_std,
             noise_type=self.noise_type,
             num_samples=self.num_samples,
             **dict(self.pl_module_params or {}),
         )
 
-    def _build_train_dataset(
-        self,
-        series: Sequence[TimeSeries],
-        past_covariates: Sequence[TimeSeries] | None,
-        future_covariates: Sequence[TimeSeries] | None,
-        sample_weight: Sequence[TimeSeries] | str | None,
-        max_samples_per_ts: int | None,
-        stride: int = 1,
-    ) -> TorchTrainingDataset:
-        return ShiftedTorchTrainingDataset(
-            series=series,
-            past_covariates=past_covariates,
-            future_covariates=future_covariates,
-            input_chunk_length=self.input_chunk_length,
-            output_chunk_length=self.input_chunk_length,
-            shift=self.output_chunk_length + self.output_chunk_shift,
-            stride=stride,
-            max_samples_per_ts=max_samples_per_ts,
-            use_static_covariates=self.uses_static_covariates,
-            sample_weight=sample_weight,
-        )
+    @property
+    def supports_static_covariates(self) -> bool:
+        return True
+
+    @property
+    def supports_future_covariates(self) -> bool:
+        return not self.shared_weights
+
+    @property
+    def supports_past_covariates(self) -> bool:
+        return not self.shared_weights
+
+    @property
+    def supports_probabilistic_prediction(self) -> bool:
+        return True
+
+NLinearModel = EnNLinearModel
+_NLinearModule = _EnNLinearModule

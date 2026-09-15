@@ -7,6 +7,7 @@ class GaussianNoise(nn.Module):
     Gaussian noise injection layer.
 
     Adds Gaussian noise only during training.
+    
     During evaluation, returns the input unchanged.
     """
 

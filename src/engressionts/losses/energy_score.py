@@ -1,6 +1,5 @@
 import torch
 from typing import List, Optional, Union
-# from neuralforecast.losses.pytorch import BasePointLoss, level_to_outputs, quantiles_to_outputs
 
 def energy_score_loss(samples: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """
@@ -74,51 +73,3 @@ def energy_score_loss(samples: torch.Tensor, target: torch.Tensor) -> torch.Tens
 #     return term1 - 0.5 * term2
 
 
-# class EnergyScoreLoss(BasePointLoss):
-#     """
-#     Energy Score loss wrapper class for NeuralForecast compatibility.
-#     """
-#     def __init__(self, level: List[int] = [80, 90], quantiles: Optional[List[float]] = None, horizon_weight = None):
-#         qs, output_names = level_to_outputs(level)
-#         qs = torch.Tensor(qs)
-#         if quantiles is not None:
-#             quantiles, output_names = quantiles_to_outputs(quantiles)
-#             qs = torch.Tensor(quantiles)
-#             
-#         super().__init__(
-#             horizon_weight=horizon_weight,
-#             outputsize_multiplier=1,  # Under the hood, the network outputs exactly 1 prediction channel
-#             output_names=output_names,
-#         )
-#         self.quantiles = torch.nn.Parameter(qs, requires_grad=False)
-# 
-#     def update_quantile(self, q):
-#         if q is not None:
-#             quantiles, output_names = quantiles_to_outputs(q)
-#             self.quantiles = torch.nn.Parameter(torch.Tensor(quantiles), requires_grad=False)
-#             self.output_names = output_names
-#             # Always ensure model configuration multiplier remains 1
-#             self.outputsize_multiplier = 1
-# 
-#     def forward(
-#         self,
-#         y: torch.Tensor,
-#         y_hat: torch.Tensor,
-#         mask: Union[torch.Tensor, None] = None,
-#         y_insample: Union[torch.Tensor, None] = None,
-#     ) -> torch.Tensor:
-#         """
-#         Computes Energy Score.
-#         In NFEngressionBaseModel, y_hat is the samples tensor of shape (M, B, H, D),
-#         and y is the target tensor of shape (B, H, D).
-#         """
-#         # Ensure target and prediction are at least 3D
-#         if y.ndim == 2:
-#             y = y.unsqueeze(-1)
-#         if y_hat.ndim == 3:
-#             y_hat = y_hat.unsqueeze(-1)
-#         if mask is not None and mask.ndim == 2:
-#             mask = mask.unsqueeze(-1)
-#             
-#         # The current energy_score_loss implementation does not support mask
-#         return energy_score_loss(samples=y_hat, target=y)

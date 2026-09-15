@@ -1,5 +1,5 @@
 """
-Temporal Fusion Transformer (TFT)
+Temporal Fusion EnTransformer (Engression-enhanced Transformer) (EnTFT (Engression-enhanced TFT))
 ---------------------------------
 """
 
@@ -44,7 +44,6 @@ from darts.utils.likelihood_models.torch import TorchLikelihood
 
 from engressionts.base.base_engression import EngressionPLModule
 
-
 class _TFTModule(EngressionPLModule):
     def __init__(
         self,
@@ -67,12 +66,19 @@ class _TFTModule(EngressionPLModule):
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing the TFT architecture from `this paper <https://arxiv.org/pdf/1912.09363.pdf>`__
+        """PyTorch module implementing the EnTFT (Engression-enhanced TFT) architecture from `this paper <https://arxiv.org/pdf/1912.09363.pdf>`__
         The implementation is built upon `pytorch-forecasting's TemporalFusionTransformer
         <https://pytorch-forecasting.readthedocs.io/en/latest/models.html>`__.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         output_dim : Tuple[int, int]
             shape of output given by (n_targets, loss_size). (loss_size corresponds to nr_params in other models).
         variables_meta : Dict[str, Dict[str, List[str]]]
@@ -81,7 +87,7 @@ class _TFTModule(EngressionPLModule):
             the number of static components (not variables) of the input target series. This is either equal to the
             number of target components or 1.
         hidden_size : int
-            hidden state size of the TFT. It is the main hyper-parameter and common across the internal TFT
+            hidden state size of the EnTFT (Engression-enhanced TFT). It is the main hyper-parameter and common across the internal EnTFT (Engression-enhanced TFT)
             architecture.
         lstm_layers : int
             number of layers for the Long Short Term Memory (LSTM) Encoder and Decoder (1 is a good default).
@@ -109,7 +115,7 @@ class _TFTModule(EngressionPLModule):
             It gives a value to the position of each step from input and output chunk relative to the prediction
             point. The values are normalized with `input_chunk_length`.
         likelihood
-            The likelihood model to be used for probabilistic forecasts. By default, the TFT uses
+            The likelihood model to be used for probabilistic forecasts. By default, the EnTFT (Engression-enhanced TFT) uses
             a ``QuantileRegression`` likelihood.
         norm_type: str | type[nn.Module]
             The type of LayerNorm variant to use.
@@ -474,10 +480,17 @@ class _TFTModule(EngressionPLModule):
 
     @io_processor
     def forward(self, x_in: PLModuleInput) -> torch.Tensor:
-        """TFT model forward pass.
+        """EnTFT (Engression-enhanced TFT) model forward pass.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             comes as tuple `(x_past, x_future, x_static, future_target)` where `x_past` is the input/past chunk and
             `x_future` is the output/future chunk. Input dimensions are `(n_samples, n_time_steps, n_variables)`
@@ -669,8 +682,6 @@ class _TFTModule(EngressionPLModule):
         self._decoder_sparse_weights = decoder_sparse_weights
         return out
 
-
-
 class EnTFTModel(MixedCovariatesTorchModel):
     def __init__(
         self,
@@ -696,9 +707,9 @@ class EnTFTModel(MixedCovariatesTorchModel):
         use_static_covariates: bool = True,
         **kwargs,
     ):
-        """Temporal Fusion Transformers (TFT) for Interpretable Time Series Forecasting.
+        """Temporal Fusion Transformers (EnTFT (Engression-enhanced TFT)) for Interpretable Time Series Forecasting.
 
-        This is an implementation of the TFT architecture, as outlined in [1]_.
+        This is an implementation of the EnTFT (Engression-enhanced TFT) architecture, as outlined in [1]_.
 
         The internal sub models are adopted from `pytorch-forecasting's TemporalFusionTransformer
         <https://pytorch-forecasting.readthedocs.io/en/latest/models.html>`__ implementation.
@@ -707,7 +718,7 @@ class EnTFTModel(MixedCovariatesTorchModel):
         future covariates (known for `output_chunk_length` points after prediction time), static covariates,
         as well as probabilistic forecasting.
 
-        The TFT applies multi-head attention queries on future inputs from mandatory ``future_covariates``.
+        The EnTFT (Engression-enhanced TFT) applies multi-head attention queries on future inputs from mandatory ``future_covariates``.
         Specifying future encoders with ``add_encoders`` (read below) can automatically generate future covariates
         and allows to use the model without having to pass any ``future_covariates`` to :func:`fit()` and
         :func:`predict()`.
@@ -717,6 +728,13 @@ class EnTFTModel(MixedCovariatesTorchModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -737,7 +755,7 @@ class EnTFTModel(MixedCovariatesTorchModel):
             `output_chunk_shift` steps after the end of the target `series`. If `output_chunk_shift` is set, the model
             cannot generate autoregressive predictions (`n > output_chunk_length`).
         hidden_size
-            Hidden state size of the TFT. It is the main hyper-parameter and common across the internal TFT
+            Hidden state size of the EnTFT (Engression-enhanced TFT). It is the main hyper-parameter and common across the internal EnTFT (Engression-enhanced TFT)
             architecture.
         lstm_layers
             Number of layers for the Long Short Term Memory (LSTM) Encoder and Decoder (1 is a good default).
@@ -749,8 +767,8 @@ class EnTFTModel(MixedCovariatesTorchModel):
         feed_forward
             A feedforward network is a fully-connected layer with an activation. Can be one of the glu variant's
             FeedForward Network (FFN) [2]_. The glu variant's FeedForward Network are a series of FFNs designed to work
-            better with Transformer based models. Defaults to ``"GatedResidualNetwork"``. ["GLU", "Bilinear", "ReGLU",
-            "GEGLU", "SwiGLU", "ReLU", "GELU"] or the TFT original FeedForward Network ["GatedResidualNetwork"].
+            better with EnTransformer (Engression-enhanced Transformer) based models. Defaults to ``"GatedResidualNetwork"``. ["GLU", "Bilinear", "ReGLU",
+            "GEGLU", "SwiGLU", "ReLU", "GELU"] or the EnTFT (Engression-enhanced TFT) original FeedForward Network ["GatedResidualNetwork"].
         dropout
             Fraction of neurons affected by dropout. This is compatible with Monte Carlo dropout
             at inference time for model uncertainty estimation (enabled with ``mc_dropout=True`` at
@@ -777,11 +795,11 @@ class EnTFTModel(MixedCovariatesTorchModel):
             VariableSelectionNetwork. Setting this to ``True`` could increase training and inference speed.
             Defaults to ``False`` to preserve the permutation in the feature embedding space.
         loss_fn: nn.Module
-            PyTorch loss function used for training. By default, the TFT model is probabilistic and uses a
+            PyTorch loss function used for training. By default, the EnTFT (Engression-enhanced TFT) model is probabilistic and uses a
             ``likelihood`` instead (``QuantileRegression``). To make the model deterministic, you can set the `
             `likelihood`` to None and give a ``loss_fn`` argument.
         likelihood
-            The likelihood model to be used for probabilistic forecasts. By default, the TFT uses
+            The likelihood model to be used for probabilistic forecasts. By default, the EnTFT (Engression-enhanced TFT) uses
             a ``QuantileRegression`` likelihood.
         norm_type: str | nn.Module
             The type of LayerNorm variant to use.  Default: ``LayerNorm``. Available options are
@@ -932,7 +950,7 @@ class EnTFTModel(MixedCovariatesTorchModel):
         References
         ----------
         .. [1] https://arxiv.org/pdf/1912.09363.pdf
-        .. [2] Shazeer, Noam, "GLU Variants Improve Transformer", 2020. arVix https://arxiv.org/abs/2002.05202.
+        .. [2] Shazeer, Noam, "GLU Variants Improve EnTransformer (Engression-enhanced Transformer)", 2020. arVix https://arxiv.org/abs/2002.05202.
         .. [3] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
                 Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
@@ -970,7 +988,7 @@ class EnTFTModel(MixedCovariatesTorchModel):
                [[-0.83076568, -0.25780816, -0.28318784]]])
 
         .. note::
-            `TFT example notebook <https://unit8co.github.io/darts/examples/13-TFT-examples.html>`__ presents
+            `EnTFT (Engression-enhanced TFT) example notebook <https://unit8co.github.io/darts/examples/13-EnTFT (Engression-enhanced TFT)-examples.html>`__ presents
             techniques that can be used to improve the forecasts quality compared to this simple usage example.
         """
         model_kwargs = {key: val for key, val in self.model_params.items()}
@@ -1015,7 +1033,6 @@ class EnTFTModel(MixedCovariatesTorchModel):
         self.norm_type = norm_type
         self._considers_static_covariates = use_static_covariates
 
-
     def _create_model(self, train_sample: TorchTrainingSample) -> PLForecastingModule:
         """
         `train_sample` contains the following tensors:
@@ -1034,7 +1051,7 @@ class EnTFTModel(MixedCovariatesTorchModel):
             time_varying_encoders : [past_targets, past_covariates, historic_future_covariates, future_covariates]
             time_varying_decoders : [historic_future_covariates, future_covariates]
 
-        `variable_meta` is used in TFT to access specific variables
+        `variable_meta` is used in EnTFT (Engression-enhanced TFT) to access specific variables
         """
         (
             past_target,

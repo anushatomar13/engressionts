@@ -1,22 +1,22 @@
 """
-N-BEATS
--------
+N-HiTS
+------
 """
-
-from enum import Enum
-from typing import NewType
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from darts.logging import raise_log
+from darts.logging import get_logger, raise_log
 from darts.models.forecasting.pl_forecasting_module import io_processor
 from darts.models.forecasting.torch_forecasting_model import PastCovariatesTorchModel
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 from darts.utils.torch import MonteCarloDropout
 
 from engressionts.base.base_engression import EngressionPLModule
+
+logger = get_logger(__name__)
 
 ACTIVATIONS = [
     "ReLU",
@@ -31,74 +31,22 @@ ACTIVATIONS = [
     "GELU",
 ]
 
-
-class _GType(Enum):
-    GENERIC = 1
-    TREND = 2
-    SEASONALITY = 3
-
-
-GTypes = NewType("GTypes", _GType)
-
-
-class _TrendGenerator(nn.Module):
-    def __init__(self, expansion_coefficient_dim, target_length):
-        super().__init__()
-
-        # basis is of size (expansion_coefficient_dim, target_length)
-        basis = torch.stack(
-            [
-                (torch.arange(target_length) / target_length) ** i
-                for i in range(expansion_coefficient_dim)
-            ],
-            dim=1,
-        ).T
-
-        self.basis = nn.Parameter(basis, requires_grad=False)
-
-    def forward(self, x):
-        return torch.matmul(x, self.basis)
-
-
-class _SeasonalityGenerator(nn.Module):
-    def __init__(self, target_length):
-        super().__init__()
-        half_minus_one = int(target_length / 2 - 1)
-        cos_vectors = [
-            torch.cos(torch.arange(target_length) / target_length * 2 * np.pi * i)
-            for i in range(1, half_minus_one + 1)
-        ]
-        sin_vectors = [
-            torch.sin(torch.arange(target_length) / target_length * 2 * np.pi * i)
-            for i in range(1, half_minus_one + 1)
-        ]
-
-        # basis is of size (2 * int(target_length / 2 - 1) + 1, target_length)
-        basis = torch.stack(
-            [torch.ones(target_length)] + cos_vectors + sin_vectors, dim=1
-        ).T
-
-        self.basis = nn.Parameter(basis, requires_grad=False)
-
-    def forward(self, x):
-        return torch.matmul(x, self.basis)
-
-
 class _Block(nn.Module):
     def __init__(
         self,
+        input_chunk_length: int,
+        output_chunk_length: int,
         num_layers: int,
         layer_width: int,
         nr_params: int,
-        expansion_coefficient_dim: int,
-        input_chunk_length: int,
-        target_length: int,
-        g_type: GTypes,
+        pooling_kernel_size: int,
+        n_freq_downsample: int,
         batch_norm: bool,
         dropout: float,
         activation: str,
+        MaxPool1d: bool,
     ):
-        """PyTorch module implementing the basic building block of the N-BEATS architecture.
+        """PyTorch module implementing the basic building block of the N-HiTS architecture.
 
         The blocks produce outputs of size (target_length, nr_params); i.e.
         "one vector per parameter". The parameters are predicted only for forecast outputs.
@@ -106,29 +54,35 @@ class _Block(nn.Module):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
+        input_chunk_length
+            The length of the input sequence fed to the model.
+        output_chunk_length
+            The length of the forecast of the model.
         num_layers
             The number of fully connected layers preceding the final forking layers.
         layer_width
             The number of neurons that make up each fully connected layer.
         nr_params
             The number of parameters of the likelihood (or 1 if no likelihood is used)
-        expansion_coefficient_dim
-            The dimensionality of the waveform generator parameters, also known as expansion coefficients.
-            Used in the generic architecture and the trend module of the interpretable architecture, where it determines
-            the degree of the polynomial basis.
-        input_chunk_length
-            The length of the input sequence fed to the model.
-        target_length
-            The length of the forecast of the model.
-        g_type
-            The type of function that is implemented by the waveform generator.
+        pooling_kernel_size
+            The kernel size for the initial pooling layer
+        n_freq_downsample
+            The factor by which to downsample time at the output (before interpolating)
         batch_norm
             Whether to use batch norm
         dropout
             Dropout probability
         activation
             The activation function of encoder/decoder intermediate layer.
-
+        MaxPool1d
+            Use MaxPool1d pooling. False uses AvgPool1d
         Inputs
         ------
         x of shape `(batch_size, input_chunk_length)`
@@ -147,67 +101,88 @@ class _Block(nn.Module):
 
         self.num_layers = num_layers
         self.layer_width = layer_width
-        self.target_length = target_length
+        self.input_chunk_length = input_chunk_length
+        self.output_chunk_length = output_chunk_length
         self.nr_params = nr_params
-        self.g_type = g_type
-        self.dropout = dropout
+        self.pooling_kernel_size = pooling_kernel_size
+        self.n_freq_downsample = n_freq_downsample
         self.batch_norm = batch_norm
+        self.dropout = dropout
+        self.MaxPool1d = MaxPool1d
 
         if activation not in ACTIVATIONS:
             raise_log(ValueError(f"'{activation}' is not in {ACTIVATIONS}."))
         self.activation = getattr(nn, activation)()
 
-        # fully connected stack before fork
-        self.linear_layer_stack_list = [nn.Linear(input_chunk_length, layer_width)]
-        for _ in range(num_layers - 1):
-            self.linear_layer_stack_list.append(nn.Linear(layer_width, layer_width))
+        # number of parameters theta for backcast and forecast
+        """
+        Note:
+        -----
+        We use two "last" layers, one for the backcast yielding n_theta_backcast outputs,
+        and one for the forecast yielding n_theta_forecast outputs.
+
+        In the original code, only one last layer yielding "input_chunk_length + n_theta_forecast" [1]
+        outputs is used. So they don't use interpolation for the backcast [2], contrary to what is
+        explained in the paper. Here we use what is explained in the paper.
+
+        [1] https://github.com/cchallu/n-hits/blob/4e929ed31e1d3ff5169b4aa0d3762a0040abb8db/
+        src/models/nhits/nhits.py#L263
+        [2] https://github.com/cchallu/n-hits/blob/4e929ed31e1d3ff5169b4aa0d3762a0040abb8db/
+        src/models/nhits/nhits.py#L66
+        """
+        n_theta_backcast = max(input_chunk_length // n_freq_downsample, 1)
+        n_theta_forecast = max(output_chunk_length // n_freq_downsample, 1)
+
+        # entry pooling layer
+        pool1d = nn.MaxPool1d if self.MaxPool1d else nn.AvgPool1d
+        self.pooling_layer = pool1d(
+            kernel_size=self.pooling_kernel_size,
+            stride=self.pooling_kernel_size,
+            ceil_mode=True,
+        )
+
+        # layer widths
+        in_len = int(np.ceil(input_chunk_length / pooling_kernel_size))
+        self.layer_widths = [in_len] + [self.layer_width] * self.num_layers
+
+        # FC layers
+        layers = []
+        for i in range(self.num_layers):
+            layers.append(
+                nn.Linear(
+                    in_features=self.layer_widths[i],
+                    out_features=self.layer_widths[i + 1],
+                )
+            )
+            layers.append(self.activation)
 
             if self.batch_norm:
-                self.linear_layer_stack_list.append(
-                    nn.BatchNorm1d(num_features=self.layer_width)
-                )
+                layers.append(nn.BatchNorm1d(num_features=self.layer_widths[i + 1]))
 
             if self.dropout > 0:
-                self.linear_layer_stack_list.append(MonteCarloDropout(p=self.dropout))
+                layers.append(MonteCarloDropout(p=self.dropout))
 
-        self.fc_stack = nn.ModuleList(self.linear_layer_stack_list)
+        self.layers = nn.Sequential(*layers)
 
         # Fully connected layer producing forecast/backcast expansion coefficients (waveform generator parameters).
-        # The coefficients are emitted for each parameter of the likelihood.
-        if g_type == _GType.SEASONALITY:
-            self.backcast_linear_layer = nn.Linear(
-                layer_width, 2 * int(input_chunk_length / 2 - 1) + 1
-            )
-            self.forecast_linear_layer = nn.Linear(
-                layer_width, nr_params * (2 * int(target_length / 2 - 1) + 1)
-            )
-        else:
-            self.backcast_linear_layer = nn.Linear(
-                layer_width, expansion_coefficient_dim
-            )
-            self.forecast_linear_layer = nn.Linear(
-                layer_width, nr_params * expansion_coefficient_dim
-            )
-
-        # waveform generator functions
-        if g_type == _GType.GENERIC:
-            self.backcast_g = nn.Linear(expansion_coefficient_dim, input_chunk_length)
-            self.forecast_g = nn.Linear(expansion_coefficient_dim, target_length)
-        elif g_type == _GType.TREND:
-            self.backcast_g = _TrendGenerator(
-                expansion_coefficient_dim, input_chunk_length
-            )
-            self.forecast_g = _TrendGenerator(expansion_coefficient_dim, target_length)
-        else:  # _GType.SEASONALITY
-            self.backcast_g = _SeasonalityGenerator(input_chunk_length)
-            self.forecast_g = _SeasonalityGenerator(target_length)
+        # The coefficients are emitted for each parameter of the likelihood for the forecast.
+        self.backcast_linear_layer = nn.Linear(
+            in_features=layer_width, out_features=n_theta_backcast
+        )
+        self.forecast_linear_layer = nn.Linear(
+            in_features=layer_width, out_features=nr_params * n_theta_forecast
+        )
 
     def forward(self, x):
         batch_size = x.shape[0]
 
+        # pooling
+        x = x.unsqueeze(1)
+        x = self.pooling_layer(x)
+        x = x.squeeze(1)
+
         # fully connected layer stack
-        for layer in self.linear_layer_stack_list:
-            x = self.activation(layer(x))
+        x = self.layers(x)
 
         # forked linear layers producing waveform generator parameters
         theta_backcast = self.backcast_linear_layer(x)
@@ -216,35 +191,55 @@ class _Block(nn.Module):
         # set the expansion coefs in last dimension for the forecasts
         theta_forecast = theta_forecast.view(batch_size, self.nr_params, -1)
 
-        # waveform generator applications (project the expansion coefs onto basis vectors)
-        x_hat = self.backcast_g(theta_backcast)
-        y_hat = self.forecast_g(theta_forecast)
+        # interpolate function expects (batch, "channels", time)
+        theta_backcast = theta_backcast.unsqueeze(1)
+
+        # interpolate both backcast and forecast from the thetas
+        x_hat = F.interpolate(
+            theta_backcast, size=self.input_chunk_length, mode="linear"
+        )
+        y_hat = F.interpolate(
+            theta_forecast, size=self.output_chunk_length, mode="linear"
+        )
+
+        x_hat = x_hat.squeeze(1)  # remove 2nd dim we added before interpolation
 
         # Set the distribution parameters as the last dimension
-        y_hat = y_hat.reshape(x.shape[0], self.target_length, self.nr_params)
+        y_hat = y_hat.reshape(x.shape[0], self.output_chunk_length, self.nr_params)
 
         return x_hat, y_hat
-
 
 class _Stack(nn.Module):
     def __init__(
         self,
+        input_chunk_length: int,
+        output_chunk_length: int,
         num_blocks: int,
         num_layers: int,
         layer_width: int,
         nr_params: int,
-        expansion_coefficient_dim: int,
-        input_chunk_length: int,
-        target_length: int,
-        g_type: GTypes,
+        pooling_kernel_sizes: tuple[int],
+        n_freq_downsample: tuple[int],
         batch_norm: bool,
         dropout: float,
         activation: str,
+        MaxPool1d: bool,
     ):
-        """PyTorch module implementing one stack of the N-BEATS architecture that comprises multiple basic blocks.
+        """PyTorch module implementing one stack of the EnBEATS (Engression-enhanced N-BEATS) architecture that comprises multiple basic blocks.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
+        input_chunk_length
+            The length of the input sequence fed to the model.
+        output_chunk_length
+            The length of the forecast of the model.
         num_blocks
             The number of blocks making up this stack.
         num_layers
@@ -253,20 +248,18 @@ class _Stack(nn.Module):
             The number of neurons that make up each fully connected layer in each block.
         nr_params
             The number of parameters of the likelihood (or 1 if no likelihood is used)
-        expansion_coefficient_dim
-            The dimensionality of the waveform generator parameters, also known as expansion coefficients.
-        input_chunk_length
-            The length of the input sequence fed to the model.
-        target_length
-            The length of the forecast of the model.
-        g_type
-            The function that is implemented by the waveform generators in each block.
+        pooling_kernel_sizes
+            sizes of pooling kernels for every block in this stack
+        n_freq_downsample
+            downsampling factors to apply for block in this stack
         batch_norm
             whether to apply batch norm on first block of this stack
         dropout
             Dropout probability
         activation
             The activation function of encoder/decoder intermediate layer.
+        MaxPool1d
+            Use MaxPool1d pooling. False uses AvgPool1d
 
         Inputs
         ------
@@ -285,53 +278,35 @@ class _Stack(nn.Module):
         super().__init__()
 
         self.input_chunk_length = input_chunk_length
-        self.target_length = target_length
+        self.output_chunk_length = output_chunk_length
         self.nr_params = nr_params
-        self.dropout = dropout
-        self.batch_norm = batch_norm
-        self.activation = activation
 
-        if g_type == _GType.GENERIC:
-            self.blocks_list = [
-                _Block(
-                    num_layers,
-                    layer_width,
-                    nr_params,
-                    expansion_coefficient_dim,
-                    input_chunk_length,
-                    target_length,
-                    g_type,
-                    batch_norm=(
-                        self.batch_norm and i == 0
-                    ),  # batch norm only on first block of first stack
-                    dropout=self.dropout,
-                    activation=self.activation,
-                )
-                for i in range(num_blocks)
-            ]
-        else:
-            # same block instance is used for weight sharing
-            interpretable_block = _Block(
+        # TODO: leave option to share weights across blocks?
+        self.blocks_list = [
+            _Block(
+                input_chunk_length,
+                output_chunk_length,
                 num_layers,
                 layer_width,
                 nr_params,
-                expansion_coefficient_dim,
-                input_chunk_length,
-                target_length,
-                g_type,
-                batch_norm=self.batch_norm,
-                dropout=self.dropout,
-                activation=self.activation,
+                pooling_kernel_sizes[i],
+                n_freq_downsample[i],
+                batch_norm=(
+                    batch_norm and i == 0
+                ),  # batch norm only on first block of first stack
+                dropout=dropout,
+                activation=activation,
+                MaxPool1d=MaxPool1d,
             )
-            self.blocks_list = [interpretable_block] * num_blocks
-
+            for i in range(num_blocks)
+        ]
         self.blocks = nn.ModuleList(self.blocks_list)
 
     def forward(self, x):
         # One forecast vector per parameter in the distribution
         stack_forecast = torch.zeros(
             x.shape[0],
-            self.target_length,
+            self.output_chunk_length,
             self.nr_params,
             device=x.device,
             dtype=x.dtype,
@@ -351,42 +326,46 @@ class _Stack(nn.Module):
 
         return stack_residual, stack_forecast
 
-
-class _EnBEATSModule(EngressionPLModule):
+class _EnHiTSModule(EngressionPLModule):
     def __init__(
         self,
         input_dim: int,
         output_dim: int,
         nr_params: int,
-        generic_architecture: bool,
         num_stacks: int,
         num_blocks: int,
         num_layers: int,
         layer_widths: list[int],
-        expansion_coefficient_dim: int,
-        trend_polynomial_degree: int,
+        pooling_kernel_sizes: tuple[tuple[int]],
+        n_freq_downsample: tuple[tuple[int]],
         batch_norm: bool,
         dropout: float,
         activation: str,
-        noise_std: float = 1.0,
+        MaxPool1d: bool,
+        noise_std: float = 0.1,
         noise_type: str = "gaussian",
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing the N-BEATS architecture.
+        """PyTorch module implementing the N-HiTS architecture.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
+        input_dim
+            The number of input components (target + optional covariates)
         output_dim
             Number of output components in the target
         nr_params
             The number of parameters of the likelihood (or 1 if no likelihood is used).
-        generic_architecture
-            Boolean value indicating whether the generic architecture of N-BEATS is used.
-            If not, the interpretable architecture outlined in the paper (consisting of one trend
-            and one seasonality stack with appropriate waveform generator functions).
         num_stacks
-            The number of stacks that make up the whole model. Only used if `generic_architecture` is set to `True`.
+            The number of stacks that make up the whole model.
         num_blocks
             The number of blocks making up every stack.
         num_layers
@@ -396,18 +375,18 @@ class _EnBEATSModule(EngressionPLModule):
             If a list is passed, it must have a length equal to `num_stacks` and every entry in that list corresponds
             to the layer width of the corresponding stack. If an integer is passed, every stack will have blocks
             with FC layers of the same width.
-        expansion_coefficient_dim
-            The dimensionality of the waveform generator parameters, also known as expansion coefficients.
-            Only used if `generic_architecture` is set to `True`.
-        trend_polynomial_degree
-            The degree of the polynomial used as waveform generator in trend stacks. Only used if
-            `generic_architecture` is set to `False`.
+        pooling_kernel_sizes
+            size of pooling kernels for every stack and every block
+        n_freq_downsample
+            downsampling factors to apply for every stack and every block
         batch_norm
             Whether to apply batch norm on first block of the first stack
         dropout
             Dropout probability
         activation
             The activation function of encoder/decoder intermediate layer.
+        MaxPool1d
+            Use MaxPool1d pooling. False uses AvgPool1d
         **kwargs
             all parameters required for :class:`darts.models.forecasting.pl_forecasting_module.PLForecastingModule`
             base class.
@@ -420,7 +399,7 @@ class _EnBEATSModule(EngressionPLModule):
         Outputs
         -------
         y of shape `(batch_size, output_chunk_length, target_size/output_dim, nr_params)`
-            Tensor containing the output of the NBEATS module.
+            Tensor containing the output of the EnBEATS (Engression-enhanced N-BEATS) module.
 
         """
         super().__init__(
@@ -434,83 +413,54 @@ class _EnBEATSModule(EngressionPLModule):
         self.output_dim = output_dim
         self.nr_params = nr_params
         self.input_chunk_length_multi = self.input_chunk_length * input_dim
-        self.target_length = self.output_chunk_length * input_dim
-        self.dropout = dropout
-        self.batch_norm = batch_norm
-        self.activation = activation
 
-        if generic_architecture:
-            self.stacks_list = [
-                _Stack(
-                    num_blocks,
-                    num_layers,
-                    layer_widths[i],
-                    nr_params,
-                    expansion_coefficient_dim,
-                    self.input_chunk_length_multi,
-                    self.target_length,
-                    _GType.GENERIC,
-                    batch_norm=(
-                        self.batch_norm and i == 0
-                    ),  # batch norm only on first block of first stack
-                    dropout=self.dropout,
-                    activation=self.activation,
-                )
-                for i in range(num_stacks)
-            ]
-        else:
-            num_stacks = 2
-            trend_stack = _Stack(
+        self.output_chunk_length_multi = self.output_chunk_length * input_dim
+
+        self.stacks_list = [
+            _Stack(
+                self.input_chunk_length_multi,
+                self.output_chunk_length_multi,
                 num_blocks,
                 num_layers,
-                layer_widths[0],
+                layer_widths[i],
                 nr_params,
-                trend_polynomial_degree + 1,
-                self.input_chunk_length_multi,
-                self.target_length,
-                _GType.TREND,
-                batch_norm=self.batch_norm,
-                dropout=self.dropout,
-                activation=self.activation,
+                pooling_kernel_sizes[i],
+                n_freq_downsample[i],
+                batch_norm=(
+                    batch_norm and i == 0
+                ),  # batch norm only on first block of first stack
+                dropout=dropout,
+                activation=activation,
+                MaxPool1d=MaxPool1d,
             )
-            seasonality_stack = _Stack(
-                num_blocks,
-                num_layers,
-                layer_widths[1],
-                nr_params,
-                -1,
-                self.input_chunk_length_multi,
-                self.target_length,
-                _GType.SEASONALITY,
-                batch_norm=self.batch_norm,
-                dropout=self.dropout,
-                activation=self.activation,
-            )
-            self.stacks_list = [trend_stack, seasonality_stack]
+            for i in range(num_stacks)
+        ]
 
         self.stacks = nn.ModuleList(self.stacks_list)
 
         # setting the last backcast "branch" to be not trainable (without next block/stack, it doesn't need to be
-        # backpropagated). Removing this lines would cause logtensorboard to crash, since no gradient is stored
+        # backpropagated). Removing this line would cause logtensorboard to crash, since no gradient is stored
         # on this params (the last block backcast is not part of the final output of the net).
         self.stacks_list[-1].blocks[-1].backcast_linear_layer.requires_grad_(False)
-        self.stacks_list[-1].blocks[-1].backcast_g.requires_grad_(False)
 
     @io_processor
     def forward(self, x_in: PLModuleInput):
+        #x, _, _ = x_in
         x = x_in[0]
 
         # if x1, x2,... y1, y2... is one multivariate ts containing x and y, and a1, a2... one covariate ts
         # we reshape into x1, y1, a1, x2, y2, a2... etc
         x = self.noise_layer(x)
+
         x = torch.reshape(x, (x.shape[0], self.input_chunk_length_multi, 1))
+
         # squeeze last dimension (because model is univariate)
         x = x.squeeze(dim=2)
 
         # One vector of length target_length per parameter in the distribution
         y = torch.zeros(
             x.shape[0],
-            self.target_length,
+            self.output_chunk_length_multi,
             self.nr_params,
             device=x.device,
             dtype=x.dtype,
@@ -536,9 +486,7 @@ class _EnBEATSModule(EngressionPLModule):
 
         return y
 
-
-
-class EnBEATSModel(PastCovariatesTorchModel):
+class EnHiTSModel(PastCovariatesTorchModel):
     @property
     def supports_probabilistic_prediction(self) -> bool:
         return True
@@ -548,33 +496,50 @@ class EnBEATSModel(PastCovariatesTorchModel):
         input_chunk_length: int,
         output_chunk_length: int,
         output_chunk_shift: int = 0,
-        generic_architecture: bool = True,
-        num_stacks: int = 30,
+        num_stacks: int = 3,
         num_blocks: int = 1,
-        num_layers: int = 4,
-        layer_widths: int | list[int] = 256,
-        expansion_coefficient_dim: int = 5,
-        trend_polynomial_degree: int = 2,
-        dropout: float = 0.0,
+        num_layers: int = 2,
+        layer_widths: int | list[int] = 512,
+        pooling_kernel_sizes: tuple[tuple[int]] | None = None,
+        n_freq_downsample: tuple[tuple[int]] | None = None,
+        dropout: float = 0.1,
         activation: str = "ReLU",
-        noise_std: float = 1.0,
+        MaxPool1d: bool = True,
+        noise_std: float = 0.1,
         noise_type: str = "gaussian",
         num_samples: int = 20,
         **kwargs,
     ):
-        """Neural Basis Expansion Analysis Time Series Forecasting (N-BEATS).
+        """An implementation of the N-HiTS model, as presented in [1]_.
 
-        This is an implementation of the N-BEATS architecture, as outlined in [1]_.
+        N-HiTS is similar to EnBEATS (Engression-enhanced N-BEATS) (implemented in :class:`NBEATSModel`),
+        but attempts to provide better performance at lower computational cost by introducing
+        multi-rate sampling of the inputs and multi-scale interpolation of the outputs.
 
-        In addition to the univariate version presented in the paper, our implementation also
-        supports multivariate series (and covariates) by flattening the model inputs to a 1-D series
-        and reshaping the outputs to a tensor of appropriate dimensions. Furthermore, it also
+        Similar to :class:`NBEATSModel`, in addition to the univariate version presented in the paper,
+        this implementation also supports multivariate series (and covariates) by flattening the model inputs
+        to a 1-D series and reshaping the outputs to a tensor of appropriate dimensions. Furthermore, it also
         supports producing probabilistic forecasts (by specifying a `likelihood` parameter).
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time).
 
+        The multi-rate sampling is done via MaxPooling, which is controlled by ``pooling_kernel_sizes``.
+        This parameter can be a tuple of tuples, of size (num_stacks x num_blocks), specifying the kernel
+        size for each block in each stack. If left to ``None``, some default values will be used based on
+        ``input_chunk_length``.
+        Similarly, the multi-scale interpolation is controlled by ``n_freq_downsample``, which gives the
+        downsampling factors to be used in each block of each stack. If left to ``None``, some default
+        values will be used based on the ``output_chunk_length``.
+
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -592,13 +557,8 @@ class EnBEATSModel(PastCovariatesTorchModel):
             `future_covariates`, the future values are extracted from the shifted output chunk. Predictions will start
             `output_chunk_shift` steps after the end of the target `series`. If `output_chunk_shift` is set, the model
             cannot generate autoregressive predictions (`n > output_chunk_length`).
-        generic_architecture
-            Boolean value indicating whether the generic architecture of N-BEATS is used.
-            If not, the interpretable architecture outlined in the paper (consisting of one trend
-            and one seasonality stack with appropriate waveform generator functions).
         num_stacks
-            The number of stacks that make up the whole model. Only used if `generic_architecture` is set to `True`.
-            The interpretable architecture always uses two stacks - one for trend and one for seasonality.
+            The number of stacks that make up the whole model.
         num_blocks
             The number of blocks making up every stack.
         num_layers
@@ -608,12 +568,14 @@ class EnBEATSModel(PastCovariatesTorchModel):
             If a list is passed, it must have a length equal to `num_stacks` and every entry in that list corresponds
             to the layer width of the corresponding stack. If an integer is passed, every stack will have blocks
             with FC layers of the same width.
-        expansion_coefficient_dim
-            The dimensionality of the waveform generator parameters, also known as expansion coefficients.
-            Only used if `generic_architecture` is set to `True`.
-        trend_polynomial_degree
-            The degree of the polynomial used as waveform generator in trend stacks. Only used if
-            `generic_architecture` is set to `False`.
+        pooling_kernel_sizes
+            If set, this parameter must be a tuple of tuples, of size (num_stacks x num_blocks), specifying the kernel
+            size for each block in each stack used for the input pooling layer.
+            If left to ``None``, some default values will be used based on ``input_chunk_length``.
+        n_freq_downsample
+            If set, this parameter must be a tuple of tuples, of size (num_stacks x num_blocks), specifying the
+            downsampling factors before interpolation, for each block in each stack.
+            If left to ``None``, some default values will be used based on ``output_chunk_length``.
         dropout
             The dropout probability to be used in fully connected layers. This is compatible with Monte Carlo dropout
             at inference time for model uncertainty estimation (enabled with ``mc_dropout=True`` at
@@ -622,6 +584,8 @@ class EnBEATSModel(PastCovariatesTorchModel):
             The activation function of encoder/decoder intermediate layer (default='ReLU').
             Supported activations: ['ReLU', 'RReLU', 'PReLU', 'ELU', 'Softplus', 'Tanh', 'SELU', 'LeakyReLU', 'Sigmoid',
             'GELU']
+        MaxPool1d
+            Use MaxPool1d pooling. False uses AvgPool1d
         **kwargs
             Optional arguments to initialize the pytorch_lightning.Module, pytorch_lightning.Trainer, and
             Darts' :class:`TorchForecastingModel`.
@@ -640,7 +604,7 @@ class EnBEATSModel(PastCovariatesTorchModel):
             The PyTorch optimizer class to be used. Default: ``torch.optim.Adam``.
         optimizer_kwargs
             Optionally, some keyword arguments for the PyTorch optimizer (e.g., ``{'lr': 1e-3}``
-            for specifying a learning rate). Otherwise the default values of the selected ``optimizer_cls``
+            for specifying a learning rate). Otherwise, the default values of the selected ``optimizer_cls``
             will be used. Default: ``None``.
         lr_scheduler_cls
             Optionally, the PyTorch learning rate scheduler class to be used. Specifying ``None`` corresponds
@@ -678,7 +642,7 @@ class EnBEATSModel(PastCovariatesTorchModel):
             Whether to automatically save the untrained model and checkpoints from training.
             To load the model from checkpoint, call :func:`MyModelClass.load_from_checkpoint()`, where
             :class:`MyModelClass` is the :class:`TorchForecastingModel` class that was used (such as :class:`TFTModel`,
-            :class:`EnBEATSModel`, etc.). If set to ``False``, the model can still be manually saved using
+            :class:`NBEATSModel`, etc.). If set to ``False``, the model can still be manually saved using
             :func:`save()` and loaded using :func:`load()`. Default: ``False``.
         add_encoders
             A large number of past and future covariates can be automatically generated with `add_encoders`.
@@ -770,40 +734,36 @@ class EnBEATSModel(PastCovariatesTorchModel):
 
         References
         ----------
-        .. [1] https://openreview.net/forum?id=r1ecqn4YwB
+        .. [1] C. Challu et al. "N-HiTS: Neural Hierarchical Interpolation for Time Series Forecasting",
+               https://arxiv.org/abs/2201.12886
         .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
                 Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------
         >>> from darts.datasets import WeatherDataset
-        >>> from darts.models import NBEATSModel
+        >>> from darts.models import NHiTSModel
         >>> series = WeatherDataset().load()
         >>> # predicting atmospheric pressure
         >>> target = series['p (mbar)'][:100]
         >>> # optionally, use past observed rainfall (pretending to be unknown beyond index 100)
         >>> past_cov = series['rain (mm)'][:100]
-        >>> # changing the activation function of the encoder/decoder to LeakyReLU
-        >>> model = NBEATSModel(
+        >>> # increasing the number of blocks
+        >>> model = NHiTSModel(
         >>>     input_chunk_length=6,
         >>>     output_chunk_length=6,
+        >>>     num_blocks=2,
         >>>     n_epochs=5,
-        >>>     activation='LeakyReLU'
         >>> )
         >>> model.fit(target, past_covariates=past_cov)
         >>> pred = model.predict(6)
         >>> print(pred.values())
-        [[ 929.78509085]
-         [1013.66339481]
-         [ 999.8843893 ]
-         [ 892.66032082]
-         [ 921.09781534]
-         [ 950.37965429]]
-
-        .. note::
-            `NBEATS example notebook <https://unit8co.github.io/darts/examples/07-NBEATS-examples.html>`__
-            presents techniques that can be used to improve the forecasts quality compared to this simple usage
-            example.
+        [[958.2354389 ]
+         [939.23201079]
+         [987.51425784]
+         [919.41209025]
+         [925.09583093]
+         [938.95625528]]
         """
         super().__init__(**self._extract_torch_model_params(**self.model_params))
 
@@ -817,29 +777,94 @@ class EnBEATSModel(PastCovariatesTorchModel):
                     "as value for the `layer_widths` argument."
                 ),
             )
-        self.noise_std = noise_std
-        self.noise_type = noise_type
-        self.num_samples = num_samples
 
-        self.generic_architecture = generic_architecture
         self.num_stacks = num_stacks
         self.num_blocks = num_blocks
         self.num_layers = num_layers
         self.layer_widths = layer_widths
-        self.expansion_coefficient_dim = expansion_coefficient_dim
-        self.trend_polynomial_degree = trend_polynomial_degree
+        self.activation = activation
+        self.MaxPool1d = MaxPool1d
 
         # Currently batch norm is not an option as it seems to perform badly
         self.batch_norm = False
 
         self.dropout = dropout
-        self.activation = activation
 
-        if not generic_architecture:
-            self.num_stacks = 2
-
+        # Check pooling and downsampling numbers or compute good defaults
+        sizes = self._prepare_pooling_downsampling(
+            pooling_kernel_sizes,
+            n_freq_downsample,
+            self.input_chunk_length,
+            self.output_chunk_length,
+            num_blocks,
+            num_stacks,
+        )
+        self.pooling_kernel_sizes, self.n_freq_downsample = sizes
+        
+        self.noise_std = noise_std
+        self.noise_type = noise_type
+        self.num_samples = num_samples
+        
         if isinstance(layer_widths, int):
             self.layer_widths = [layer_widths] * self.num_stacks
+
+    @staticmethod
+    def _prepare_pooling_downsampling(
+        pooling_kernel_sizes, n_freq_downsample, in_len, out_len, num_blocks, num_stacks
+    ):
+        def _check_sizes(tup, name):
+            if len(tup) != num_stacks:
+                raise_log(
+                    ValueError(
+                        f"the length of {name} must match the number of stacks."
+                    ),
+                )
+            if not all([len(i) == num_blocks for i in tup]):
+                raise_log(
+                    ValueError(
+                        f"the length of each tuple in {name} must be `num_blocks={num_blocks}`."
+                    ),
+                )
+
+        if pooling_kernel_sizes is None:
+            # make stacks handle different frequencies
+            # go from in_len/2 to 1 in num_stacks steps:
+            max_v = max(in_len // 2, 1)
+            pooling_kernel_sizes = tuple(
+                (int(v),) * num_blocks
+                for v in max_v // np.geomspace(1, max_v, num_stacks)
+            )
+            logger.info(
+                f"(N-HiTS): Using automatic kernel pooling size: {pooling_kernel_sizes}."
+            )
+        else:
+            # check provided pooling format
+            _check_sizes(pooling_kernel_sizes, "`pooling_kernel_sizes`")
+
+        if n_freq_downsample is None:
+            # go from out_len/2 to 1 in num_stacks steps:
+            max_v = max(out_len // 2, 1)
+            n_freq_downsample = tuple(
+                (int(v),) * num_blocks
+                for v in max_v // np.geomspace(1, max_v, num_stacks)
+            )
+            logger.info(
+                f"(N-HiTS):  Using automatic downsampling coefficients: {n_freq_downsample}."
+            )
+        else:
+            # check provided downsample format
+            _check_sizes(n_freq_downsample, "`n_freq_downsample`")
+
+            # check that last value is 1
+            if n_freq_downsample[-1][-1] != 1:
+                raise_log(
+                    ValueError(
+                        "the downsampling coefficient of the last block of the last stack must be 1 "
+                        + "(i.e., `n_freq_downsample[-1][-1]`)."
+                    ),
+                )
+
+        return pooling_kernel_sizes, n_freq_downsample
 
     def _create_model(self, train_sample: TorchTrainingSample) -> torch.nn.Module:
         # samples are made of (past target, past cov, historic future cov, future cov, static cov, future_target)
@@ -850,20 +875,20 @@ class EnBEATSModel(PastCovariatesTorchModel):
         output_dim = past_target.shape[1]
         nr_params = 1 if self.likelihood is None else self.likelihood.num_parameters
 
-        return _EnBEATSModule(
+        return _EnHiTSModule(
             input_dim=input_dim,
             output_dim=output_dim,
             nr_params=nr_params,
-            generic_architecture=self.generic_architecture,
             num_stacks=self.num_stacks,
             num_blocks=self.num_blocks,
             num_layers=self.num_layers,
             layer_widths=self.layer_widths,
-            expansion_coefficient_dim=self.expansion_coefficient_dim,
-            trend_polynomial_degree=self.trend_polynomial_degree,
+            pooling_kernel_sizes=self.pooling_kernel_sizes,
+            n_freq_downsample=self.n_freq_downsample,
             batch_norm=self.batch_norm,
             dropout=self.dropout,
             activation=self.activation,
+            MaxPool1d=self.MaxPool1d,
             noise_std=self.noise_std,
             noise_type=self.noise_type,
             num_samples=self.num_samples,

@@ -1,5 +1,5 @@
 """
-Time-series Dense Encoder (TiDE)
+Time-series Dense Encoder (EnTiDE (Engression-enhanced TiDE))
 --------------------------------
 """
 
@@ -18,7 +18,6 @@ from engressionts.base.base_engression import EngressionPLModule
 
 logger = get_logger(__name__)
 
-
 class _ResidualBlock(nn.Module):
     def __init__(
         self,
@@ -28,7 +27,7 @@ class _ResidualBlock(nn.Module):
         dropout: float,
         use_layer_norm: bool,
     ):
-        """Pytorch module implementing the Residual Block from the TiDE paper."""
+        """Pytorch module implementing the Residual Block from the EnTiDE (Engression-enhanced TiDE) paper."""
         super().__init__()
 
         # dense layer with ReLU activation with dropout
@@ -58,7 +57,6 @@ class _ResidualBlock(nn.Module):
 
         return x
 
-
 class _EnTideModule(EngressionPLModule):
     def __init__(
         self,
@@ -83,10 +81,17 @@ class _EnTideModule(EngressionPLModule):
         num_samples: int = 20,
         **kwargs,
     ):
-        """Pytorch module implementing the TiDE architecture.
+        """Pytorch module implementing the EnTiDE (Engression-enhanced TiDE) architecture.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_dim
             The number of input components (target + optional past covariates + optional future covariates).
         output_dim
@@ -270,9 +275,16 @@ class _EnTideModule(EngressionPLModule):
 
     @io_processor
     def forward(self, x_in: PLModuleInput) -> torch.Tensor:
-        """TiDE model forward pass.
+        """EnTiDE (Engression-enhanced TiDE) model forward pass.
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             comes as tuple `(x_past, x_future, x_static, future_target)` where `x_past` is the input/past chunk and
             `x_future` is the output/future chunk. Input dimensions are `(batch_size, time_steps, components)`
@@ -372,7 +384,6 @@ class _EnTideModule(EngressionPLModule):
         y = y.view(-1, self.output_chunk_length, self.output_dim, self.nr_params)
         return y
 
-
 class EnTiDEModel(MixedCovariatesTorchModel):
     def __init__(
         self,
@@ -396,9 +407,9 @@ class EnTiDEModel(MixedCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """An implementation of the TiDE model, as presented in [1]_.
+        """An implementation of the EnTiDE (Engression-enhanced TiDE) model, as presented in [1]_.
 
-        TiDE is similar to Transformers (implemented in :class:`TransformerModel`),
+        EnTiDE (Engression-enhanced TiDE) is similar to Transformers (implemented in :class:`TransformerModel`),
         but attempts to provide better performance at lower computational cost by introducing
         multilayer perceptron (MLP)-based encoder-decoders without attention.
 
@@ -413,6 +424,13 @@ class EnTiDEModel(MixedCovariatesTorchModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -612,7 +630,7 @@ class EnTiDEModel(MixedCovariatesTorchModel):
 
         References
         ----------
-        .. [1] A. Das et al. "Long-term Forecasting with TiDE: Time-series Dense Encoder",
+        .. [1] A. Das et al. "Long-term Forecasting with EnTiDE (Engression-enhanced TiDE): Time-series Dense Encoder",
                 http://arxiv.org/abs/2304.08424
         .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
                 Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
@@ -644,7 +662,7 @@ class EnTiDEModel(MixedCovariatesTorchModel):
          [1005.91534452]]
 
         .. note::
-            `TiDE example notebook <https://unit8co.github.io/darts/examples/18-TiDE-examples.html>`__ presents
+            `EnTiDE (Engression-enhanced TiDE) example notebook <https://unit8co.github.io/darts/examples/18-EnTiDE (Engression-enhanced TiDE)-examples.html>`__ presents
             techniques that can be used to improve the forecasts quality compared to this simple usage example.
         """
         if temporal_width_past < 0 or temporal_width_future < 0:
@@ -762,7 +780,6 @@ class EnTiDEModel(MixedCovariatesTorchModel):
     @property
     def supports_probabilistic_prediction(self) -> bool:
         return True
-
 
 TiDEModel = EnTiDEModel
 _TideModule = _EnTideModule

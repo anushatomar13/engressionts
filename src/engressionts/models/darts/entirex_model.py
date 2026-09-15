@@ -34,7 +34,6 @@ from engressionts.base.base_engression import EngressionPLModule
 
 logger = get_logger(__name__)
 
-
 class _EnTiRexModule(EngressionPLModule):
     """PyTorch Lightning module wrapping a pre-loaded TiRex pipeline.
 
@@ -104,6 +103,13 @@ class _EnTiRexModule(EngressionPLModule):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             ``(x_past, x_future, x_static, future_target)`` the past, future, and static features, as well as
             the future target.
@@ -161,7 +167,6 @@ class _EnTiRexModule(EngressionPLModule):
                 output, target, sample_weight
             )
         return super()._compute_loss(output, target, criterion, sample_weight)
-
 
 class EnTiRexModel(FoundationModel):
     _DEFAULT_QUANTILES: tuple[float, ...] = (
@@ -231,6 +236,13 @@ class EnTiRexModel(FoundationModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -274,12 +286,6 @@ class EnTiRexModel(FoundationModel):
             ``work_dir`` parameter used for saving model checkpoints during fine-tuning.
         tirex_kwargs
             Additional keyword arguments forwarded to ``tirex.load_model()``.
-        noise_std
-            The standard deviation of the noise injected into the model input for engression.
-        noise_type
-            The type of noise injected into the model input for engression.
-        num_samples
-            The number of samples drawn from the noise distribution at prediction time for engression.
         **kwargs
             Optional arguments to initialize the pytorch_lightning.Module, pytorch_lightning.Trainer, and
             Darts' :class:`TorchForecastingModel`.
@@ -561,7 +567,6 @@ class EnTiRexModel(FoundationModel):
             all_quantiles=self._DEFAULT_QUANTILES,
             **pl_module_params,
         )
-
 
 TiRexModel = EnTiRexModel
 _TiRexModule = _EnTiRexModule

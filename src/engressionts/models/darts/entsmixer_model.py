@@ -1,5 +1,5 @@
 """
-Time-Series Mixer (TSMixer)
+Time-Series Mixer (EnTSMixer (Engression-enhanced TSMixer))
 ---------------------------
 """
 
@@ -57,11 +57,9 @@ NORMS = [
     "TimeBatchNorm2d",
 ]
 
-
 def _time_to_feature(x: torch.Tensor) -> torch.Tensor:
     """Converts a time series Tensor to a feature Tensor."""
     return x.permute(0, 2, 1)
-
 
 class TimeBatchNorm2d(nn.BatchNorm2d):
     def __init__(self, *args, **kwargs):
@@ -81,7 +79,6 @@ class TimeBatchNorm2d(nn.BatchNorm2d):
         # reshape back to (batch_size, timepoints, features)
         return output.squeeze(1)
 
-
 class _FeatureMixing(nn.Module):
     def __init__(
         self,
@@ -95,7 +92,7 @@ class _FeatureMixing(nn.Module):
         norm_type: nn.Module,
     ) -> None:
         """A module for feature mixing with flexibility in normalization and activation based on the
-        `PyTorch implementation of TSMixer <https://github.com/ditschuk/pytorch-tsmixer>`__.
+        `PyTorch implementation of EnTSMixer (Engression-enhanced TSMixer) <https://github.com/ditschuk/pytorch-tsmixer>`__.
 
         This module provides options for batch normalization before or after mixing
         features, uses dropout for regularization, and allows for different activation
@@ -103,6 +100,13 @@ class _FeatureMixing(nn.Module):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         sequence_length
             The length of the input sequences.
         input_dim
@@ -156,7 +160,6 @@ class _FeatureMixing(nn.Module):
         x = self.norm_after(x)
         return x
 
-
 class _TimeMixing(nn.Module):
     def __init__(
         self,
@@ -168,7 +171,7 @@ class _TimeMixing(nn.Module):
         norm_type: nn.Module,
     ) -> None:
         """Applies a transformation over the time dimension of a sequence based on the
-        `PyTorch implementation of TSMixer <https://github.com/ditschuk/pytorch-tsmixer>`__.
+        `PyTorch implementation of EnTSMixer (Engression-enhanced TSMixer) <https://github.com/ditschuk/pytorch-tsmixer>`__.
 
         This module applies a linear transformation followed by an activation function
         and dropout over the sequence length of the input feature torch.Tensor after converting
@@ -176,6 +179,13 @@ class _TimeMixing(nn.Module):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         sequence_length
             The length of the sequences to be transformed.
         input_dim
@@ -217,7 +227,6 @@ class _TimeMixing(nn.Module):
         x_temp = self.norm_after(x_temp)
         return x_temp
 
-
 class _ConditionalMixerLayer(nn.Module):
     def __init__(
         self,
@@ -232,7 +241,7 @@ class _ConditionalMixerLayer(nn.Module):
         norm_type: nn.Module,
     ) -> None:
         """Conditional mix layer combining time and feature mixing with static context based on the
-        `PyTorch implementation of TSMixer <https://github.com/ditschuk/pytorch-tsmixer>`__.
+        `PyTorch implementation of EnTSMixer (Engression-enhanced TSMixer) <https://github.com/ditschuk/pytorch-tsmixer>`__.
 
         This module combines time mixing and conditional feature mixing, where the latter
         is influenced by static features. This allows the module to learn representations
@@ -240,6 +249,13 @@ class _ConditionalMixerLayer(nn.Module):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         sequence_length
             The length of the input sequences.
         input_dim
@@ -304,7 +320,6 @@ class _ConditionalMixerLayer(nn.Module):
         x = self.feature_mixing(x)
         return x
 
-
 class _EnTSMixerModule(EngressionPLModule):
     def __init__(
         self,
@@ -327,10 +342,17 @@ class _EnTSMixerModule(EngressionPLModule):
         **kwargs,
     ) -> None:
         """
-        Initializes the TSMixer module for use within a Darts forecasting model.
+        Initializes the EnTSMixer (Engression-enhanced TSMixer) module for use within a Darts forecasting model.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_dim
             Number of input target features.
         output_dim
@@ -345,7 +367,7 @@ class _EnTSMixerModule(EngressionPLModule):
         nr_params
             The number of parameters of the likelihood (or 1 if no likelihood is used).
         hidden_size
-           Hidden state size of the TSMixer.
+           Hidden state size of the EnTSMixer (Engression-enhanced TSMixer).
         ff_size
             Dimension of the feedforward network internal to the module.
         num_blocks
@@ -459,10 +481,17 @@ class _EnTSMixerModule(EngressionPLModule):
     @io_processor
     def forward(self, x_in: PLModuleInput) -> torch.Tensor:
         # x_hist contains the historical time series data and the historical
-        """TSMixer model forward pass.
+        """EnTSMixer (Engression-enhanced TSMixer) model forward pass.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             comes as Tuple `(x_past, x_future, x_static, future_target)` where `x_past` is the input/past chunk and
             `x_future` is the output/future chunk. Input dimensions are `(batch_size, time_steps,
@@ -519,7 +548,6 @@ class _EnTSMixerModule(EngressionPLModule):
         x = x.view(-1, self.output_chunk_length, self.output_dim, self.nr_params)
         return x
 
-
 class EnTSMixerModel(MixedCovariatesTorchModel):
     def __init__(
         self,
@@ -539,13 +567,13 @@ class EnTSMixerModel(MixedCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ) -> None:
-        """Time-Series Mixer (TSMixer): An All-MLP Architecture for Time Series.
+        """Time-Series Mixer (EnTSMixer (Engression-enhanced TSMixer)): An All-MLP Architecture for Time Series.
 
-        This is an implementation of the TSMixer architecture, as outlined in [1]_. A major part of the architecture
+        This is an implementation of the EnTSMixer (Engression-enhanced TSMixer) architecture, as outlined in [1]_. A major part of the architecture
         was adopted from `this PyTorch implementation <https://github.com/ditschuk/pytorch-tsmixer>`__. Additional
         changes were applied to increase model performance and efficiency.
 
-        TSMixer forecasts time series data by integrating historical time series data, future known inputs, and static
+        EnTSMixer (Engression-enhanced TSMixer) forecasts time series data by integrating historical time series data, future known inputs, and static
         contextual information. It uses a combination of conditional feature mixing and mixer layers to process and
         combine these different types of data for effective forecasting.
 
@@ -555,6 +583,13 @@ class EnTSMixerModel(MixedCovariatesTorchModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -800,6 +835,13 @@ class EnTSMixerModel(MixedCovariatesTorchModel):
         """
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         train_sample
             contains the following torch.Tensors: `(past_target, past_covariates, historic_future_covariates,
             future_covariates, static_covariates, future_target)`:
@@ -858,7 +900,6 @@ class EnTSMixerModel(MixedCovariatesTorchModel):
     @property
     def supports_probabilistic_prediction(self) -> bool:
         return True
-
 
 TSMixerModel = EnTSMixerModel
 _TSMixerModule = _EnTSMixerModule

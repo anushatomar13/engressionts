@@ -33,7 +33,6 @@ from engressionts.base.base_engression import EngressionPLModule
 
 logger = get_logger(__name__)
 
-
 class CustomRNNModule(EngressionPLModule, ABC):
     def __init__(
         self,
@@ -48,7 +47,7 @@ class CustomRNNModule(EngressionPLModule, ABC):
         num_samples: int = 20,
         **kwargs,
     ):
-        """This class allows to create custom RNN modules that can later be used with Darts' :class:`RNNModel`.
+        """This class allows to create custom EnRNN (Engression-enhanced RNN) modules that can later be used with Darts' :class:`RNNModel`.
         It adds the backbone that is required to be used with Darts' :class:`TorchForecastingModel` and
         :class:`RNNModel`.
 
@@ -64,10 +63,17 @@ class CustomRNNModule(EngressionPLModule, ABC):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_size
             The dimensionality of the input time series.
         hidden_dim
-            The number of features in the hidden state `h` of the RNN module.
+            The number of features in the hidden state `h` of the EnRNN (Engression-enhanced RNN) module.
         num_layers
             The number of recurrent layers.
         target_size
@@ -75,7 +81,7 @@ class CustomRNNModule(EngressionPLModule, ABC):
         nr_params
             The number of parameters of the likelihood (or 1 if no likelihood is used).
         dropout
-            The fraction of neurons that are dropped in all-but-last RNN layers.
+            The fraction of neurons that are dropped in all-but-last EnRNN (Engression-enhanced RNN) layers.
         **kwargs
             all parameters required for :class:`darts.models.forecasting.pl_forecasting_module.PLForecastingModule`
             base class.
@@ -101,10 +107,17 @@ class CustomRNNModule(EngressionPLModule, ABC):
     def forward(
         self, x_in: PLModuleInput, h: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """RNN Module forward.
+        """EnRNN (Engression-enhanced RNN) Module forward.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             Tuple of Tensors containing the features of the input sequence. The tuple has elements (past target,
             historic future covariates, future covariates, static covariates). The shape of the past target is
@@ -115,7 +128,7 @@ class CustomRNNModule(EngressionPLModule, ABC):
         Returns
         -------
         Tuple[torch.Tensor, torch.Tensor]
-            Tuple of Tensors with elements (RNN output, hidden state). The RNN output Tensor has shape
+            Tuple of Tensors with elements (EnRNN (Engression-enhanced RNN) output, hidden state). The EnRNN (Engression-enhanced RNN) output Tensor has shape
             `(batch_size, output_chunk_length, target_size, nr_params)`. It contains the outputs at every
             time step of the input sequence. During training the whole tensor is used as output, whereas during
             prediction we only use y[:, -1, :]. However, this module always returns the whole Tensor.
@@ -243,7 +256,6 @@ class CustomRNNModule(EngressionPLModule, ABC):
         batch_prediction = batch_prediction[:, :n, :]
         return batch_prediction
 
-
 # TODO add batch norm
 class _EnRNNModule(CustomRNNModule):
     def __init__(
@@ -254,17 +266,24 @@ class _EnRNNModule(CustomRNNModule):
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing an RNN to be used in `RNNModel`.
+        """PyTorch module implementing an EnRNN (Engression-enhanced RNN) to be used in `RNNModel`.
 
-        PyTorch module implementing a simple RNN with the specified `name` type.
-        This module combines a PyTorch RNN module, together with one fully connected layer which
-        maps the hidden state of the RNN at each step to the output value of the model at that
+        PyTorch module implementing a simple EnRNN (Engression-enhanced RNN) with the specified `name` type.
+        This module combines a PyTorch EnRNN (Engression-enhanced RNN) module, together with one fully connected layer which
+        maps the hidden state of the EnRNN (Engression-enhanced RNN) at each step to the output value of the model at that
         time step.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         name
-            The name of the specific PyTorch RNN module ("RNN", "GRU" or "LSTM").
+            The name of the specific PyTorch EnRNN (Engression-enhanced RNN) module ("EnRNN (Engression-enhanced RNN)", "GRU" or "LSTM").
         **kwargs
             all parameters required for the :class:`darts.models.forecasting.CustomRNNModule` base class.
 
@@ -276,7 +295,7 @@ class _EnRNNModule(CustomRNNModule):
         Outputs
         -------
         y of shape `(batch_size, output_chunk_length, target_size, nr_params)`
-            Tensor containing the outputs of the RNN at every time step of the input sequence.
+            Tensor containing the outputs of the EnRNN (Engression-enhanced RNN) at every time step of the input sequence.
             During training the whole tensor is used as output, whereas during prediction we only use y[:, -1, :].
             However, this module always returns the whole Tensor.
         """
@@ -325,7 +344,6 @@ class _EnRNNModule(CustomRNNModule):
         # returns outputs for all inputs, only the last one is needed for prediction time
         return predictions, last_hidden_state
 
-
 class EnRNNModel(DualCovariatesTorchModel):
     @property
     def supports_probabilistic_prediction(self) -> bool:
@@ -348,7 +366,7 @@ class EnRNNModel(DualCovariatesTorchModel):
 
         This class provides three variants of RNNs:
 
-        * Vanilla RNN
+        * Vanilla EnRNN (Engression-enhanced RNN)
 
         * LSTM
 
@@ -366,25 +384,32 @@ class EnRNNModel(DualCovariatesTorchModel):
         in the past and the future). The model will complain if the provided `future_covariates` series doesn't have
         an appropriate time span.
 
-        For a block version using an RNN model as an encoder only and supporting past
+        For a block version using an EnRNN (Engression-enhanced RNN) model as an encoder only and supporting past
         covariates, checkout `BlockRNNModel`.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of past time steps that are fed to the forecasting module at prediction time.
         model
-            Either a string specifying the RNN module type ("RNN", "LSTM" or "GRU"), or a subclass of
+            Either a string specifying the EnRNN (Engression-enhanced RNN) module type ("EnRNN (Engression-enhanced RNN)", "LSTM" or "GRU"), or a subclass of
             :class:`CustomRNNModule` (the class itself, not an object of the class) with a custom logic.
         hidden_dim
-            Size for feature maps for each hidden RNN layer (:math:`h_n`).
+            Size for feature maps for each hidden EnRNN (Engression-enhanced RNN) layer (:math:`h_n`).
         n_rnn_layers
             The number of recurrent layers.
         dropout
             Fraction of neurons affected by Dropout.
         training_length
             The length of both input (target and covariates) and output (target) time series used during
-            training. Must be `>input_chunk_length`, because otherwise during training the RNN is never run for as
+            training. Must be `>input_chunk_length`, because otherwise during training the EnRNN (Engression-enhanced RNN) is never run for as
             many iterations as it will during inference. For training, a
             :class:`~darts.utils.data.torch_datasets.training_dataset.ShiftedTorchTrainingDataset` is used with
             parameters `input_chunk_length=output_chunk_length=training_length` and `shift=1`.
@@ -540,7 +565,7 @@ class EnRNNModel(DualCovariatesTorchModel):
         >>> future_cov = series['T (degC)'][:106]
         >>> # `training_length` > `input_chunk_length` to mimic inference constraints
         >>> model = RNNModel(
-        >>>     model="RNN",
+        >>>     model="EnRNN (Engression-enhanced RNN)",
         >>>     input_chunk_length=6,
         >>>     training_length=18,
         >>>     n_epochs=20,
@@ -556,7 +581,7 @@ class EnRNNModel(DualCovariatesTorchModel):
          [-0.01829086]]
 
         .. note::
-            `RNN example notebook <https://unit8co.github.io/darts/examples/04-RNN-examples.html>`__ presents techniques
+            `EnRNN (Engression-enhanced RNN) example notebook <https://unit8co.github.io/darts/examples/04-EnRNN (Engression-enhanced RNN)-examples.html>`__ presents techniques
             that can be used to improve the forecasts quality compared to this simple usage example.
         """
         kwargs.setdefault("likelihood", None)
@@ -680,7 +705,6 @@ class EnRNNModel(DualCovariatesTorchModel):
         return (
             super().min_train_samples + self.training_length - self.input_chunk_length
         )
-
 
 RNNModel = EnRNNModel
 _RNNModule = _EnRNNModule

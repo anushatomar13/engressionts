@@ -1,5 +1,5 @@
 """
-Transformer Model
+EnTransformer (Engression-enhanced Transformer) Model
 -----------------
 """
 
@@ -26,7 +26,6 @@ from engressionts.base.base_engression import EngressionPLModule
 BUILT_IN = ["relu", "gelu"]
 FFN = GLU_FFN + BUILT_IN
 
-
 def _generate_coder(
     d_model,
     dim_ff,
@@ -41,6 +40,15 @@ def _generate_coder(
     """Generates an Encoder or Decoder with one of Darts' Feed-forward Network variants.
     Parameters
     ----------
+    noise_std
+        The standard deviation of the noise injected into the model input for engression.
+    noise_type
+        The type of noise injected into the model input for engression.
+    num_samples
+        The number of samples drawn from the noise distribution at prediction time for engression.
+
+    The remaining parameters are same as those in the Darts library:
+
     coder_cls
         Either `torch.nn.TransformerEncoder` or `...TransformerDecoder`
     layer_cls
@@ -68,7 +76,6 @@ def _generate_coder(
         norm=norm_layer(d_model),
     )
 
-
 # This implementation of positional encoding is taken from the PyTorch documentation:
 # https://pytorch.org/tutorials/beginner/transformer_tutorial.html
 class _PositionalEncoding(nn.Module):
@@ -77,6 +84,13 @@ class _PositionalEncoding(nn.Module):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         d_model
             The number of expected features in the transformer encoder/decoder inputs.
             Last dimension of the input.
@@ -113,7 +127,6 @@ class _PositionalEncoding(nn.Module):
         x = x + self.pe[start_pos : start_pos + x.size(0)]
         return self.dropout(x)
 
-
 class _EnTransformerModule(EngressionPLModule):
     def __init__(
         self,
@@ -135,12 +148,19 @@ class _EnTransformerModule(EngressionPLModule):
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing a Transformer to be used in `TransformerModel`.
+        """PyTorch module implementing a EnTransformer (Engression-enhanced Transformer) to be used in `TransformerModel`.
 
         PyTorch module implementing a simple encoder-decoder transformer architecture.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_size
             The dimensionality of the TimeSeries instances that will be fed to the fit and predict functions.
         output_size
@@ -167,12 +187,6 @@ class _EnTransformerModule(EngressionPLModule):
             A custom transformer encoder provided by the user (default=None).
         custom_decoder
             A custom transformer decoder provided by the user (default=None).
-        noise_std
-            The standard deviation of the noise injected into the model input for engression.
-        noise_type
-            The type of noise injected into the model input for engression.
-        num_samples
-            The number of samples drawn from the noise distribution at prediction time for engression.
         **kwargs
             All parameters required for :class:`darts.models.forecasting.pl_forecasting_module.PLForecastingModule`
             base class.
@@ -304,6 +318,13 @@ class _EnTransformerModule(EngressionPLModule):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             ``PLModuleInput`` tuple of ``(x_past, x_future, x_static, future_target)``, where ``x_past``
             has shape ``(batch_size, input_chunk_length, input_size)``.
@@ -367,7 +388,6 @@ class _EnTransformerModule(EngressionPLModule):
         out = self.decoder(x).permute(1, 0, 2)
         return out.view(-1, seq_len, self.target_size, self.nr_params)
 
-
 class EnTransformerModel(PastCovariatesTorchModel):
     @property
     def supports_probabilistic_prediction(self) -> bool:
@@ -393,9 +413,9 @@ class EnTransformerModel(PastCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """Transformer model
+        """EnTransformer (Engression-enhanced Transformer) model
 
-        Transformer is a state-of-the-art deep learning model introduced in 2017. It is an encoder-decoder
+        EnTransformer (Engression-enhanced Transformer) is a state-of-the-art deep learning model introduced in 2017. It is an encoder-decoder
         architecture whose core feature is the 'multi-head attention' mechanism, which is able to
         draw intra-dependencies within the input vector and within the output vector ('self-attention')
         as well as inter-dependencies between input and output vectors ('encoder-decoder attention').
@@ -408,6 +428,13 @@ class EnTransformerModel(PastCovariatesTorchModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -441,7 +468,7 @@ class EnTransformerModel(PastCovariatesTorchModel):
             The activation function of encoder/decoder intermediate layer, (default='relu').
             can be one of the glu variant's FeedForward Network (FFN) [2]_. A feedforward network is a
             fully-connected layer with an activation. The glu variant's FeedForward Network are a series
-            of FFNs designed to work better with Transformer based models. ["GLU", "Bilinear", "ReGLU", "GEGLU",
+            of FFNs designed to work better with EnTransformer (Engression-enhanced Transformer) based models. ["GLU", "Bilinear", "ReGLU", "GEGLU",
             "SwiGLU", "ReLU", "GELU"] or one the pytorch internal activations ["relu", "gelu"]
         norm_type: str | nn.Module
             The type of LayerNorm variant to use.  Default: ``None``. Available options are
@@ -450,12 +477,6 @@ class EnTransformerModel(PastCovariatesTorchModel):
             A custom user-provided encoder module for the transformer. Default: ``None``.
         custom_decoder
             A custom user-provided decoder module for the transformer. Default: ``None``.
-        noise_std
-            The standard deviation of the noise injected into the model input for engression.
-        noise_type
-            The type of noise injected into the model input for engression.
-        num_samples
-            The number of samples drawn from the noise distribution at prediction time for engression.
         **kwargs
             Optional arguments to initialize the pytorch_lightning.Module, pytorch_lightning.Trainer, and
             Darts' :class:`TorchForecastingModel`.
@@ -607,7 +628,7 @@ class EnTransformerModel(PastCovariatesTorchModel):
         .. [1] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser,
                and Illia Polosukhin, "Attention Is All You Need", 2017. In Advances in Neural Information Processing
                Systems, pages 6000-6010. https://arxiv.org/abs/1706.03762.
-        .. [2] Shazeer, Noam, "GLU Variants Improve Transformer", 2020. arVix https://arxiv.org/abs/2002.05202.
+        .. [2] Shazeer, Noam, "GLU Variants Improve EnTransformer (Engression-enhanced Transformer)", 2020. arVix https://arxiv.org/abs/2002.05202.
         .. [3] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
                 Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
         .. [4] Teacher Forcing PyTorch tutorial: https://github.com/pytorch/examples/tree/main/word_language_model
@@ -637,7 +658,7 @@ class EnTransformerModel(PastCovariatesTorchModel):
          [5.65417736]]
 
         .. note::
-            `Transformer example notebook <https://unit8co.github.io/darts/examples/06-Transformer-examples.html>`__
+            `EnTransformer (Engression-enhanced Transformer) example notebook <https://unit8co.github.io/darts/examples/06-EnTransformer (Engression-enhanced Transformer)-examples.html>`__
             presents techniques that can be used to improve the forecasts quality compared to this simple usage
             example.
         ..
@@ -689,7 +710,6 @@ class EnTransformerModel(PastCovariatesTorchModel):
             num_samples=self.num_samples,
             **dict(self.pl_module_params or {}),
         )
-
 
 TransformerModel = EnTransformerModel
 _TransformerModule = _EnTransformerModule

@@ -1,5 +1,5 @@
 """
-Chronos-2
+EnChronos (Engression-enhanced Chronos)-2
 ---------
 
 For detailed examples and tutorials, see:
@@ -48,7 +48,6 @@ from darts.utils.likelihood_models.torch import QuantileRegression
 
 from engressionts.base.base_engression import EngressionPLModule
 
-
 @dataclass
 class _Chronos2ForecastingConfig:
     context_length: int
@@ -60,7 +59,6 @@ class _Chronos2ForecastingConfig:
     use_arcsinh: bool = False
     max_output_patches: int = 1
     time_encoding_scale: int | None = None
-
 
 class _EnChronos2Module(EngressionPLModule):
     def __init__(
@@ -81,20 +79,27 @@ class _EnChronos2Module(EngressionPLModule):
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing the Chronos-2 model, ported from
+        """PyTorch module implementing the EnChronos (Engression-enhanced Chronos)-2 model, ported from
         `amazon-science/chronos-forecasting <https://github.com/amazon-science/chronos-forecasting>`_ and
         adapted for Darts :class:`PLForecastingModule` interface.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         d_model
-            Dimension of the model embeddings, also called "model size" in Transformer.
+            Dimension of the model embeddings, also called "model size" in EnTransformer (Engression-enhanced Transformer).
         d_kv
             Dimension of the key and value projections in multi-head attention.
         d_ff
             Dimension of the feed-forward network hidden layer.
         num_layers
-            Number of Chronos-2 encoder layers.
+            Number of EnChronos (Engression-enhanced Chronos)-2 encoder layers.
         num_heads
             Number of attention heads in each encoder block.
         dropout_rate
@@ -108,13 +113,7 @@ class _EnChronos2Module(EngressionPLModule):
         attn_implementation
             Attention implementation to use. If None, defaults to "sdpa".
         chronos_config
-            Configuration parameters for Chronos-2 model. See :class:`_Chronos2ForecastingConfig` for details.
-        noise_std
-            The standard deviation of the noise injected into the model input for engression.
-        noise_type
-            The type of noise injected into the model input for engression.
-        num_samples
-            The number of samples drawn from the noise distribution at prediction time for engression.
+            Configuration parameters for EnChronos (Engression-enhanced Chronos)-2 model. See :class:`_Chronos2ForecastingConfig` for details.
         **kwargs
             all parameters required for :class:`darts.models.forecasting.pl_forecasting_module.PLForecastingModule`
             base class.
@@ -373,10 +372,17 @@ class _EnChronos2Module(EngressionPLModule):
         future_covariates: torch.Tensor,
         num_output_patches: int = 1,
     ) -> torch.Tensor:
-        """Original forward pass of the Chronos-2 model.
+        """Original forward pass of the EnChronos (Engression-enhanced Chronos)-2 model.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         context
             Input tensor of shape (batch_size, context_length) containing the historical values
         group_ids : torch.Tensor | None, optional
@@ -495,10 +501,17 @@ class _EnChronos2Module(EngressionPLModule):
     # breaking existing behavior, while also allowing fine-tuning with normalized loss.
     @io_processor
     def forward(self, x_in: PLModuleInput, *args, **kwargs) -> Any:
-        """Chronos-2 model forward pass.
+        """EnChronos (Engression-enhanced Chronos)-2 model forward pass.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         x_in
             comes as a tuple `(x_past, x_future, x_static, future_target)` where `x_past` is the input/past chunk and
             `x_future` is the output/future chunk. Input dimensions are `(n_samples, n_time_steps, n_variables)`
@@ -605,7 +618,6 @@ class _EnChronos2Module(EngressionPLModule):
         else:
             return super()._compute_loss(output, target, criterion, sample_weight)
 
-
 class EnChronos2Model(FoundationModel):
     @property
     def supports_probabilistic_prediction(self) -> bool:
@@ -625,18 +637,18 @@ class EnChronos2Model(FoundationModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """Chronos-2 Model for zero-shot forecasting.
+        """EnChronos (Engression-enhanced Chronos)-2 Model for zero-shot forecasting.
 
-        This is an implementation of Amazon's Chronos-2 model [1]_, [2]_, ported from
+        This is an implementation of Amazon's EnChronos (Engression-enhanced Chronos)-2 model [1]_, [2]_, ported from
         `amazon-science/chronos-forecasting <https://github.com/amazon-science/chronos-forecasting>`_
         with adaptations to use the Darts API. From the original authors:
 
-        "Chronos-2 is a 120M-parameter, encoder-only time series foundation model for zero-shot forecasting. It supports
+        "EnChronos (Engression-enhanced Chronos)-2 is a 120M-parameter, encoder-only time series foundation model for zero-shot forecasting. It supports
         univariate, multivariate, and covariate-informed tasks within a single architecture. Inspired by the T5 encoder,
-        Chronos-2 produces multi-step-ahead quantile forecasts and uses a group attention mechanism for efficient
+        EnChronos (Engression-enhanced Chronos)-2 produces multi-step-ahead quantile forecasts and uses a group attention mechanism for efficient
         in-context learning across related series and covariates. Trained on a combination of real-world and large-scale
         synthetic datasets, it achieves state-of-the-art zero-shot accuracy among public models on fev-bench, GIFT-Eval,
-        and Chronos Benchmark II. Chronos-2 is also highly efficient, delivering over 300 time series forecasts per
+        and EnChronos (Engression-enhanced Chronos) Benchmark II. EnChronos (Engression-enhanced Chronos)-2 is also highly efficient, delivering over 300 time series forecasts per
         second on a single A10G GPU and supporting both GPU and CPU inference."
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time),
@@ -646,18 +658,18 @@ class EnChronos2Model(FoundationModel):
         (amazon/chronos-2). Alternatively, you can specify a local directory containing the model config and weights
         using the ``local_dir`` parameter.
 
-        Two other variants of Chronos-2 are available on HuggingFace Hub:
+        Two other variants of EnChronos (Engression-enhanced Chronos)-2 are available on HuggingFace Hub:
 
         - `autogluon/chronos-2-small <https://huggingface.co/autogluon/chronos-2-small>`_: a smaller 28M parameter
-          Chronos-2 model.
+          EnChronos (Engression-enhanced Chronos)-2 model.
         - `autogluon/chronos-2-synth <https://huggingface.co/autogluon/chronos-2-synth>`_: a 120M parameter
-          Chronos-2 model trained on synthetic data only.
+          EnChronos (Engression-enhanced Chronos)-2 model trained on synthetic data only.
 
         To use either of those variants, specify the ``hub_model_name`` parameter to the desired model ID.
 
         By default, this model is deterministic and outputs only the median (0.5 quantile). To enable probabilistic
         forecasts, pass a :class:`~darts.utils.likelihood_models.torch.QuantileRegression` instance to the
-        ``likelihood`` parameter. The quantiles used must be a subset of those used during Chronos-2 pre-training, see
+        ``likelihood`` parameter. The quantiles used must be a subset of those used during EnChronos (Engression-enhanced Chronos)-2 pre-training, see
         below for details. It is recommended to call :func:`predict()` with ``predict_likelihood_parameters=True``
         or ``num_samples >> 1`` to get meaningful results.
 
@@ -669,7 +681,7 @@ class EnChronos2Model(FoundationModel):
             Read more in the parameter description below and in the `Fine-Tuning Examples
             <https://unit8co.github.io/darts/examples/27-Torch-and-Foundation-Model-Fine-Tuning-examples.html>`__.
         .. note::
-            Chronos-2 is licensed under the `Apache-2.0 License <https://github.com/amazon-science/chronos-forecasting/blob/main/LICENSE>`_,
+            EnChronos (Engression-enhanced Chronos)-2 is licensed under the `Apache-2.0 License <https://github.com/amazon-science/chronos-forecasting/blob/main/LICENSE>`_,
             copyright Amazon.com, Inc. or its affiliates. By using this model, you agree to the terms and conditions of
             the license.
         .. note::
@@ -678,12 +690,19 @@ class EnChronos2Model(FoundationModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
             Can be either an ``int`` for a fixed input window, or a ``(min_length, max_length)`` tuple to enable
             variable-length inputs for inference and fine-tuning.
-            The maximum value is 8192 for Chronos-2.
+            The maximum value is 8192 for EnChronos (Engression-enhanced Chronos)-2.
         output_chunk_length
             Number of time steps predicted at once (per chunk) by the internal model. Also, the number of future values
             from future covariates to use as a model input (if the model supports future covariates). It is not the same
@@ -692,7 +711,7 @@ class EnChronos2Model(FoundationModel):
             auto-regression. This is useful when the covariates don't extend far enough into the future, or to prohibit
             the model from using future values of past and / or future covariates for prediction (depending on the
             model's covariate support).
-            For Chronos-2, `output_chunk_length + output_chunk_shift` must be less than or equal to 1024.
+            For EnChronos (Engression-enhanced Chronos)-2, `output_chunk_length + output_chunk_shift` must be less than or equal to 1024.
         output_chunk_shift
             Optionally, the number of steps to shift the start of the output chunk into the future (relative to the
             input chunk end). This will create a gap between the input and output. If the model supports
@@ -702,7 +721,7 @@ class EnChronos2Model(FoundationModel):
         likelihood
             The likelihood model to be used for probabilistic forecasts. Must be ``None`` or an instance of
             :class:`~darts.utils.likelihood_models.torch.QuantileRegression`. If using ``QuantileRegression``,
-            the quantiles must be a subset of those used during Chronos-2 pre-training:
+            the quantiles must be a subset of those used during EnChronos (Engression-enhanced Chronos)-2 pre-training:
             [0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9,
             0.95, 0.99].
             Default: ``None``, which will make the model deterministic (median quantile only).
@@ -720,12 +739,6 @@ class EnChronos2Model(FoundationModel):
             model will be downloaded from HuggingFace Hub and saved to this directory. Default is ``None``, which will
             use a cache directory managed by ``huggingface_hub`` instead. Note that this is different from the
             ``work_dir`` parameter used for saving model checkpoints during fine-tuning.
-        noise_std
-            The standard deviation of the noise injected into the model input for engression.
-        noise_type
-            The type of noise injected into the model input for engression.
-        num_samples
-            The number of samples drawn from the noise distribution at prediction time for engression.
         **kwargs
             Optional arguments to initialize the pytorch_lightning.Module, pytorch_lightning.Trainer, and
             Darts' :class:`TorchForecastingModel`.
@@ -865,9 +878,9 @@ class EnChronos2Model(FoundationModel):
 
         References
         ----------
-        .. [1] A. Ansari, O. Shchur, J. Küken et al. "Chronos-2: From Univariate to Universal Forecasting", 2025.
+        .. [1] A. Ansari, O. Shchur, J. Küken et al. "EnChronos (Engression-enhanced Chronos)-2: From Univariate to Universal Forecasting", 2025.
                 arXiv https://arxiv.org/abs/2510.15821.
-        .. [2] "Introducing Chronos-2: From univariate to universal forecasting", 2025. Amazon Science Blog.
+        .. [2] "Introducing EnChronos (Engression-enhanced Chronos)-2: From univariate to universal forecasting", 2025. Amazon Science Blog.
                 https://www.amazon.science/blog/introducing-chronos-2-from-univariate-to-universal-forecasting
 
         Examples
@@ -985,7 +998,6 @@ class EnChronos2Model(FoundationModel):
             module_class=_EnChronos2Module,
             pl_module_params=pl_module_params,
         )
-
 
 Chronos2Model = EnChronos2Model
 _Chronos2Module = _EnChronos2Module

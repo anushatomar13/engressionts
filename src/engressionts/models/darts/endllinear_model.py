@@ -1,23 +1,61 @@
 """
-N-Linear
+D-Linear
 --------
 """
 
 import torch
 import torch.nn as nn
 
-from darts.logging import raise_log
 from darts.models.forecasting.pl_forecasting_module import (
     io_processor,
 )
 from darts.models.forecasting.torch_forecasting_model import MixedCovariatesTorchModel
-from engressionts.base.base_engression import EngressionPLModule
 from darts.utils.data.torch_datasets.utils import PLModuleInput, TorchTrainingSample
 
+from engressionts.base.base_engression import EngressionPLModule
 
-class _EnNLinearModule(EngressionPLModule):
+class _MovingAvg(nn.Module):
     """
-    NLinear module
+    Moving average block to highlight the trend of time series
+    """
+
+    def __init__(self, kernel_size, stride):
+        super().__init__()
+        # asymmetrical padding, shorther on the ts start side
+        if kernel_size % 2 == 0:
+            self.padding_size_left = kernel_size // 2 - 1
+            self.padding_size_right = kernel_size // 2
+        else:
+            self.padding_size_left = (kernel_size - 1) // 2
+            self.padding_size_right = (kernel_size - 1) // 2
+        self.avg = nn.AvgPool1d(kernel_size=kernel_size, stride=stride, padding=0)
+
+    def forward(self, x):
+        # padding on the both ends of time series with the extremities values
+        front = x[:, 0:1, :].repeat(1, self.padding_size_left, 1)
+        end = x[:, -1:, :].repeat(1, self.padding_size_right, 1)
+        x = torch.cat([front, x, end], dim=1)
+        x = self.avg(x.permute(0, 2, 1))
+        x = x.permute(0, 2, 1)
+        return x
+
+class _SeriesDecomp(nn.Module):
+    """
+    Series decomposition block
+    """
+
+    def __init__(self, kernel_size):
+        super().__init__()
+        self.moving_avg = _MovingAvg(kernel_size, stride=1)
+
+    def forward(self, x):
+        moving_mean = self.moving_avg(x)
+        res = x - moving_mean
+        return res, moving_mean
+
+class _EnDLinearModule(EngressionPLModule):
+    """
+    EnDLinear (Engression-enhanced DLinear) module
     """
 
     def __init__(
@@ -28,17 +66,24 @@ class _EnNLinearModule(EngressionPLModule):
         static_cov_dim: int,
         nr_params: int,
         shared_weights: bool,
+        kernel_size: int,
         const_init: bool,
-        normalize: bool,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
         num_samples: int = 20,
         **kwargs,
     ):
-        """PyTorch module implementing the N-HiTS architecture.
+        """PyTorch module implementing the EnDLinear (Engression-enhanced DLinear) architecture.
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_dim
             The number of input components (target + optional covariate)
         output_dim
@@ -52,11 +97,10 @@ class _EnNLinearModule(EngressionPLModule):
         shared_weights
             Whether to use shared weights for the components of the series.
             ** Ignores covariates when True. **
+        kernel_size
+            The size of the kernel for the moving average
         const_init
             Whether to initialize the weights to 1/in_len
-        normalize
-            Whether to apply the "normalization" described in the paper.
-
         **kwargs
             all parameters required for :class:`darts.models.forecasting.pl_forecasting_module.PLForecastingModule`
             base class.
@@ -69,9 +113,9 @@ class _EnNLinearModule(EngressionPLModule):
         Outputs
         -------
         y of shape `(batch_size, output_chunk_length, target_size/output_dim, nr_params)`
-            Tensor containing the output of the NBEATS module.
-
+            Tensor containing the output of the EnBEATS (Engression-enhanced N-BEATS) module.
         """
+
         super().__init__(
             noise_std=noise_std,
             noise_type=noise_type,
@@ -83,9 +127,11 @@ class _EnNLinearModule(EngressionPLModule):
         self.future_cov_dim = future_cov_dim
         self.static_cov_dim = static_cov_dim
         self.nr_params = nr_params
-        self.shared_weights = shared_weights
         self.const_init = const_init
-        self.normalize = normalize
+
+        # Decomposition Kernel Size
+        self.decomposition = _SeriesDecomp(kernel_size)
+        self.shared_weights = shared_weights
 
         def _create_linear_layer(in_dim, out_dim):
             layer = nn.Linear(in_dim, out_dim)
@@ -102,7 +148,8 @@ class _EnNLinearModule(EngressionPLModule):
             layer_in_dim = self.input_chunk_length * self.input_dim
             layer_out_dim = self.output_chunk_length * self.output_dim * self.nr_params
 
-        self.layer = _create_linear_layer(layer_in_dim, layer_out_dim)
+        self.linear_seasonal = _create_linear_layer(layer_in_dim, layer_out_dim)
+        self.linear_trend = _create_linear_layer(layer_in_dim, layer_out_dim)
 
         if self.future_cov_dim != 0:
             # future covariates layer acts on time steps independently
@@ -118,48 +165,47 @@ class _EnNLinearModule(EngressionPLModule):
     def forward(self, x_in: PLModuleInput):
         """
         x_in
-            comes as tuple `(x, x_future, x_static, future_target)` where `x` is the past target, past covariates and
-            historic future covariate chunk and `x_future` is the (non-historic) future chunk.
-            Input dimensions are `(n_samples, n_time_steps, n_variables)`
+            comes as tuple `(x_past, x_future, x_static, future_target)` where `x_past` is the input/past chunk and
+            `x_future` is the output/future chunk. Input dimensions are `(n_samples, n_time_steps, n_variables)`
         """
+
         x, x_future, x_static = x_in[:3]  # x: (batch, in_len, in_dim)
         x = self.noise_layer(x)
-        # we clone `x`, to avoid value mutation from normalization when performing auto-regression
-        x = x.clone()
         batch, _, _ = x.shape
-        seq_last = None
 
         if self.shared_weights:
             # discard covariates, to ensure that in_dim == out_dim
             x = x[:, :, : self.output_dim]
-            x = x.permute(0, 2, 1)  # (batch, out_dim, in_len)
 
-            if self.normalize:
-                seq_last = x[:, :, -1:].detach().clone()  # (batch, out_dim, 1)
-                x = x - seq_last
+            # extract trend
+            res, trend = self.decomposition(x)
 
-            x = self.layer(x)  # (batch, out_dim, out_len * nr_params)
+            # permute to (batch, in_dim, in_len) and apply linear layer on last dimension
+            seasonal_output = self.linear_seasonal(res.permute(0, 2, 1))
+            trend_output = self.linear_trend(trend.permute(0, 2, 1))
 
-            if self.normalize:
-                x = x + seq_last
+            x = seasonal_output + trend_output
 
             # extract nr_params
             x = x.view(batch, self.output_dim, self.output_chunk_length, self.nr_params)
 
             # permute back to (batch, out_len, out_dim, nr_params)
             x = x.permute(0, 2, 1, 3)
-        else:
-            if self.normalize:
-                # get last values for all x but not future covariates
-                past_dim = self.input_dim - self.future_cov_dim
-                seq_last = x[:, -1:, :past_dim].detach().clone()
-                # normalize the input
-                x[:, :, :past_dim] -= seq_last
 
-            x = self.layer(x.view(batch, -1))  # (batch, out_len * out_dim * nr_params)
-            x = x.view(
+        else:
+            res, trend = self.decomposition(x)
+
+            # (in_len * in_dim) => (out_len * out_dim * out_nr_params)
+            seasonal_output = self.linear_seasonal(res.view(batch, -1))
+            trend_output = self.linear_trend(trend.view(batch, -1))
+            seasonal_output = seasonal_output.view(
                 batch, self.output_chunk_length, self.output_dim * self.nr_params
             )
+            trend_output = trend_output.view(
+                batch, self.output_chunk_length, self.output_dim * self.nr_params
+            )
+
+            x = seasonal_output + trend_output
 
             if self.future_cov_dim != 0:
                 # x_future might be shorter than output_chunk_length when n < output_chunk_length
@@ -182,31 +228,27 @@ class _EnNLinearModule(EngressionPLModule):
                     batch, self.output_chunk_length, self.output_dim * self.nr_params
                 )
 
-            if self.normalize:
-                # Reverse the normalization for the target
-                x = x + seq_last[:, :, : self.output_dim]
-
+            # extract nr_params
             x = x.view(batch, self.output_chunk_length, self.output_dim, self.nr_params)
 
         return x
 
-
-class EnNLinearModel(MixedCovariatesTorchModel):
+class EnDLinearModel(MixedCovariatesTorchModel):
     def __init__(
         self,
         input_chunk_length: int,
         output_chunk_length: int,
         output_chunk_shift: int = 0,
         shared_weights: bool = False,
+        kernel_size: int = 25,
         const_init: bool = True,
-        normalize: bool = True,
         use_static_covariates: bool = True,
         noise_std: float = 1.0,
         noise_type: str = "gaussian",
         num_samples: int = 20,
         **kwargs,
     ):
-        """An implementation of the NLinear model, as presented in [1]_.
+        """An implementation of the EnDLinear (Engression-enhanced DLinear) model, as presented in [1]_.
 
         This implementation is improved by allowing the optional use of past covariates (known for
         `input_chunk_length` points before prediction time), future covariates (known for `output_chunk_length`
@@ -214,6 +256,13 @@ class EnNLinearModel(MixedCovariatesTorchModel):
 
         Parameters
         ----------
+        noise_std
+            The standard deviation of the noise injected into the model input for engression.
+        noise_type
+            The type of noise injected into the model input for engression.
+        num_samples
+            The number of samples drawn from the noise distribution at prediction time for engression.
+
         input_chunk_length
             Number of time steps in the past to take as a model input (per chunk). Applies to the target
             series, and past and/or future covariates (if the model supports it).
@@ -241,19 +290,12 @@ class EnNLinearModel(MixedCovariatesTorchModel):
 
             Default: False.
 
+        kernel_size
+            The size of the kernel for the moving average (default=25). If the size of the kernel is even,
+            the padding will be asymmetrical (shorter on the start/left side).
         const_init
             Whether to initialize the weights to 1/in_len. If False, the default PyTorch
             initialization is used (default='True').
-        normalize
-            Whether to apply the simple "normalization" proposed in the paper, which consists
-            in subtracting the last value of the input sequence from the input sequence. This is applied for the target
-            series and past covariates, but not future covariates because it would defeat the use of encoders (see
-            `add_encoders`). Without normalization, the models behaves like the simple Linear model proposed in the
-            paper. Default: True.
-
-            .. note::
-                This cannot be applied to probabilistic models.
-            ..
         use_static_covariates
             Whether the model should use static covariate information in case the input `series` passed to ``fit()``
             contain static covariates. If ``True``, and static covariates are available at fitting time, will enforce
@@ -414,7 +456,7 @@ class EnNLinearModel(MixedCovariatesTorchModel):
         Examples
         --------
         >>> from darts.datasets import WeatherDataset
-        >>> from darts.models import NLinearModel
+        >>> from darts.models import DLinearModel
         >>> series = WeatherDataset().load()
         >>> # predicting atmospheric pressure
         >>> target = series['p (mbar)'][:100]
@@ -424,7 +466,7 @@ class EnNLinearModel(MixedCovariatesTorchModel):
         >>> future_cov = series['T (degC)'][:106]
         >>> # predict 6 pressure values using the 12 past values of pressure and rainfall, as well as the 6 temperature
         >>> # values corresponding to the forecasted period
-        >>> model = NLinearModel(
+        >>> model = DLinearModel(
         >>>     input_chunk_length=6,
         >>>     output_chunk_length=6,
         >>>     n_epochs=20,
@@ -432,12 +474,17 @@ class EnNLinearModel(MixedCovariatesTorchModel):
         >>> model.fit(target, past_covariates=past_cov, future_covariates=future_cov)
         >>> pred = model.predict(6)
         >>> print(pred.values())
-        [[429.56117169]
-         [428.93264096]
-         [428.35210616]
-         [428.13154426]
-         [427.98781641]
-         [428.00325481]]
+        [[667.20957388]
+         [666.76986848]
+         [666.67733306]
+         [666.06625381]
+         [665.8529289 ]
+         [665.75320573]]
+
+        .. note::
+            This simple usage example produces poor forecasts. In order to obtain better performance, user should
+            transform the input data, increase the number of epochs, use a validation set, optimize the hyper-
+            parameters, ...
         """
         kwargs.setdefault("likelihood", None)
         super().__init__(**self._extract_torch_model_params(**self.model_params))
@@ -446,24 +493,13 @@ class EnNLinearModel(MixedCovariatesTorchModel):
         self.pl_module_params = self._extract_pl_module_params(**self.model_params)
 
         self.shared_weights = shared_weights
+        self.kernel_size = kernel_size
         self.const_init = const_init
-        self.normalize = normalize
         self._considers_static_covariates = use_static_covariates
 
         self.noise_std = noise_std
         self.noise_type = noise_type
         self.num_samples = num_samples
-
-        if (
-            "likelihood" in self.model_params
-            and self.model_params["likelihood"] is not None
-            and self.normalize
-        ):
-            raise_log(
-                ValueError(
-                    "normalize = True cannot be used with probabilistic NLinearModel."
-                ),
-            )
 
     def _create_model(self, train_sample: TorchTrainingSample) -> torch.nn.Module:
         # samples are made of (past target, past cov, historic future cov, future cov, static cov, future_target)
@@ -487,18 +523,17 @@ class EnNLinearModel(MixedCovariatesTorchModel):
             static_cov_dim = static_covariates.shape[0] * static_covariates.shape[1]
 
         output_dim = past_target.shape[1]
-
         nr_params = 1 if self.likelihood is None else self.likelihood.num_parameters
 
-        return _EnNLinearModule(
+        return _EnDLinearModule(
             input_dim=input_dim,
             output_dim=output_dim,
             future_cov_dim=future_cov_dim,
             static_cov_dim=static_cov_dim,
             nr_params=nr_params,
             shared_weights=self.shared_weights,
+            kernel_size=self.kernel_size,
             const_init=self.const_init,
-            normalize=self.normalize,
             noise_std=self.noise_std,
             noise_type=self.noise_type,
             num_samples=self.num_samples,
@@ -521,6 +556,5 @@ class EnNLinearModel(MixedCovariatesTorchModel):
     def supports_probabilistic_prediction(self) -> bool:
         return True
 
-
-NLinearModel = EnNLinearModel
-_NLinearModule = _EnNLinearModule
+DLinearModel = EnDLinearModel
+_DLinearModule = _EnDLinearModule
