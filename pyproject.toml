@@ -19,11 +19,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-foundation = [
-    "transformers",
-    "huggingface_hub",
-    "tirex"
-]
 dev = [
     "pytest",
     "black",
