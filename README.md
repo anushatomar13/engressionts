@@ -2,6 +2,8 @@
 
 A probabilistic time-series forecasting package combining Darts models with the Engression training paradigm.
 
+<img width="1208" height="293" alt="EngTS" src="https://github.com/user-attachments/assets/6114ef1e-9332-4352-9a42-5a4e787ec8ef" />
+
 
 ## Installation
 
