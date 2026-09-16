@@ -2,6 +2,7 @@
 
 A probabilistic time-series forecasting package combining Darts models with the Engression training paradigm.
 
+
 ## Installation
 
 You can install `engressionts` directly from GitHub using `pip`:
@@ -12,39 +13,39 @@ pip install git+https://github.com/anushatomar13/engressionts.git
 
 
 
-## Quick Start
+## Usage
 
-Once installed, you can use the models seamlessly in your Jupyter Notebooks or Python scripts just like standard Darts models!
+`engressionts` models are built directly on top of `darts` and share the same API. You can initialize any Engression model by passing both standard Darts architecture parameters and Engression-specific parameters (like `noise_type` and `num_samples_train`).
 
+### 1. Import and Initialize
 ```python
-import matplotlib.pyplot as plt
-from darts.datasets import AirPassengersDataset
-from engressionts.models import EnTransformerModel
+from engressionts.models.darts import EnTiDEModel
 
-# 1. Load some sample time-series data
-series = AirPassengersDataset().load()
-
-# 2. Initialize an Engression Model 
-# (You pass both Darts parameters and Engression parameters!)
-model = EnTransformerModel(
-    input_chunk_length=12, 
-    output_chunk_length=6, 
-    n_epochs=10,
-    num_samples=20,          # Engression parameter
-    noise_type="gaussian",   # Engression parameter
-    noise_std=0.1            # Engression parameter
+# Initialize an Engression Model 
+model = EnTiDEModel(
+    input_chunk_length=24, 
+    output_chunk_length=24,
+    # Engression-specific parameters:
+    num_samples_train=10,          
+    noise_type="uniform",   
+    noise_std=1.0            
 )
-
-# 3. Train the model
-model.fit(series)
-
-# 4. Generate a probabilistic forecast 
-# (Set num_samples > 1 to draw stochastic trajectories)
-pred = model.predict(n=6, num_samples=100)
-
-# 5. Plot the forecast with uncertainty intervals
-series.tail(24).plot(label="Actual")
-pred.plot(label="Forecast")
-plt.legend()
-plt.show()
 ```
+
+### 2. Train the Model
+```python
+# Train the model using the Energy Score loss
+model.fit(train_series, past_covariates=past_covariates)
+```
+
+### 3. Generate Probabilistic Forecasts
+```python
+# Generate stochastic trajectories by setting num_samples > 1
+pred = model.predict(n=24, num_samples=100)
+```
+
+## Detailed Tutorial
+
+For a comprehensive, end-to-end tutorial on configuring and evaluating `engressionts` models (including data preprocessing, deterministic seeding, and advanced probabilistic metrics), please check out the example notebook provided in the repository:
+
+- [EngressionTS Solar Example](./examples/EngressionTS_Solar_Example.ipynb)
