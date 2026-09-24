@@ -1,4 +1,4 @@
-# EngressionTS: Probabilistic time-series forecasting via Engression.
+# EngressionTS: Probabilistic time-series forecasting via Engression
 
 **Anusha Tomar, Rajdeep Pathak, and Tanujit Chakraborty**
 
@@ -10,7 +10,7 @@
 
 ## Overview
 
-**EngressionTS** is a Python package for probabilistic time-series forecasting that combines neural forecasting architectures from Darts with Engression. It provides a common framework for generating probabilistic forecasts and capturing uncertainty directly through the model.
+**EngressionTS** is a Python package for probabilistic time-series forecasting that combines neural forecasting architectures with Engression. It provides a common framework for generating probabilistic forecasts and capturing uncertainty directly through the model.
 
 ---
 
@@ -22,7 +22,7 @@
 
 - **Energy-Based Training** : Uses the **Energy Score** as the training objective to encourage forecasts that are both close to the observed values and appropriately diverse.
 
-- **Darts Architecture Integration** : Extends established Darts forecasting architectures, including RNNs, TCNs, Transformers, N-HiTS, TiDE, and TSMixer, with Engression-based probabilistic forecasting.
+- **Models** : Integrates deep time series forecasting architectures, including RNNs, TCNs, Transformers, NHITS, TiDE, and TSMixer, with Engression-based probabilistic forecasting.
 
 - **Unified Probabilistic Framework** : Provides a common interface for training, inference, and evaluation of Engression-augmented forecasting models across different time-series datasets and architectures.
 
