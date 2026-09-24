@@ -362,11 +362,13 @@ class EnRNNModel(DualCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """Recurrent Neural Network Model (RNNs).
+        """EnRNN: Engression-enhanced Recurrent Neural Network.
 
         This class provides three variants of RNNs:
 
         * Vanilla EnRNN (Engression-enhanced RNN)
+
+        Many parameters follow from the standard Darts library.
 
         * LSTM
 

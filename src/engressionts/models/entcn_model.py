@@ -298,11 +298,11 @@ class EnTCNModel(PastCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """Temporal Convolutional Network Model (EnTCN (Engression-enhanced TCN)).
-
-        This is an implementation of a dilated EnTCN (Engression-enhanced TCN) used for forecasting, inspired from [1]_.
+        """EnTCN: Engression-enhanced Temporal Convolutional Network.
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time).
+
+        Many parameters follow from the standard Darts library.
 
         Parameters
         ----------
@@ -490,12 +490,6 @@ class EnTCNModel(PastCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] https://arxiv.org/abs/1803.01271
-        .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------

@@ -413,7 +413,7 @@ class EnTransformerModel(PastCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """EnTransformer (Engression-enhanced Transformer) model
+        """EnTransformer: Engression-enhanced Transformer.
 
         EnTransformer (Engression-enhanced Transformer) is a state-of-the-art deep learning model introduced in 2017. It is an encoder-decoder
         architecture whose core feature is the 'multi-head attention' mechanism, which is able to
@@ -422,9 +422,9 @@ class EnTransformerModel(PastCovariatesTorchModel):
         The multi-head attention mechanism is highly parallelizable, which makes the transformer architecture
         very suitable to be trained with GPUs.
 
-        The transformer architecture implemented here is based on [1]_ and uses teacher forcing [4]_.
-
         This model supports past covariates (known for `input_chunk_length` points before prediction time).
+
+        Many parameters follow from the standard Darts library.
 
         Parameters
         ----------
@@ -622,16 +622,6 @@ class EnTransformerModel(PastCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser,
-               and Illia Polosukhin, "Attention Is All You Need", 2017. In Advances in Neural Information Processing
-               Systems, pages 6000-6010. https://arxiv.org/abs/1706.03762.
-        .. [2] Shazeer, Noam, "GLU Variants Improve EnTransformer (Engression-enhanced Transformer)", 2020. arVix https://arxiv.org/abs/2002.05202.
-        .. [3] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
-        .. [4] Teacher Forcing PyTorch tutorial: https://github.com/pytorch/examples/tree/main/word_language_model
 
         Examples
         --------

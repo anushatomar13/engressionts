@@ -211,11 +211,9 @@ class EnNLinearModel(MixedCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """An implementation of the EnNLinear (Engression-enhanced NLinear) model, as presented in [1]_.
+        """EnNLinear: Engression-enhanced Normalized Linear Model.
 
-        This implementation is improved by allowing the optional use of past covariates (known for
-        `input_chunk_length` points before prediction time), future covariates (known for `output_chunk_length`
-        points after prediction time) and static covariates, as well as supporting probabilistic forecasting.
+        Many parameters follow from the standard Darts library.
 
         Parameters
         ----------
@@ -415,13 +413,6 @@ class EnNLinearModel(MixedCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] Zeng, A., Chen, M., Zhang, L., & Xu, Q. (2022).
-               Are Transformers Effective for Time Series Forecasting?. arXiv preprint arXiv:2205.13504.
-        .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------

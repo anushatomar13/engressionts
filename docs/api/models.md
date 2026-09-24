@@ -1,6 +1,6 @@
 # Forecasting Models
 
-All forecasting models in `engressionts` inherit from PyTorch Darts forecasting models and incorporate Engression noise injection and loss evaluation.
+All forecasting models in `engressionts` inherit from PyTorch Darts forecasting models and incorporate Engression noise injection and loss evaluation. We plan to incorporate more neural forecasting models in the future.
 
 ---
 

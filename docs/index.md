@@ -1,10 +1,10 @@
-# Welcome to engressionts's documentation!
+# Welcome to engressionts' documentation!
 
 **engressionts** is a specialized Python package designed for deep distributional time-series forecasting. It integrates state-of-the-art time-series models from **Darts** with **Engression** (Energy-based regression), offering a unified framework for probabilistic forecasting with model-intrinsic uncertainty quantification.
 
-### Key Highlights
+## Key Highlights
 - **Probabilistic Forecasting**: Calibrated uncertainty quantification using Energy Score loss and target noise injection.
-- **11 Deep Neural Architectures**: Built-in support for N-BEATS, N-HiTS, TFT, TiDE, Transformers, TSMixer, DLinear, NLinear, TCN, RNN, and BlockRNN.
+- **11 Deep Learning Time-Series Architectures**: Built-in support for N-BEATS, N-HiTS, TFT, TiDE, Transformers, TSMixer, DLinear, NLinear, TCN, RNN, and BlockRNN. We plan to add more deep learning time-series models soon!
 - **Flexible Noise Distributions**: Target noise modeling using Gaussian, Uniform, and custom distributions.
 - **PyTorch Lightning Core**: Multi-GPU/CPU training, scalable DataLoaders, and automated logging.
 

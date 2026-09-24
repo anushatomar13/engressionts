@@ -407,11 +407,7 @@ class EnTiDEModel(MixedCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """An implementation of the EnTiDE (Engression-enhanced TiDE) model, as presented in [1]_.
-
-        EnTiDE (Engression-enhanced TiDE) is similar to Transformers (implemented in :class:`TransformerModel`),
-        but attempts to provide better performance at lower computational cost by introducing
-        multilayer perceptron (MLP)-based encoder-decoders without attention.
+        """EnTiDE: Engression-enhanced Time-series Dense Encoder.
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time),
         future covariates (known for `output_chunk_length` points after prediction time), static covariates,
@@ -421,6 +417,8 @@ class EnTiDEModel(MixedCovariatesTorchModel):
         the encoder and decoder can be controlled via ``num_encoder_layers`` and ``num_decoder_layers`` respectively.
         The width of the layers in the residual blocks can be controlled via ``hidden_size``. Similarly, the width
         of the layers in the temporal decoder can be controlled via ``temporal_decoder_hidden``.
+
+        Many parameters follow from the standard Darts library.
 
         Parameters
         ----------
@@ -627,13 +625,6 @@ class EnTiDEModel(MixedCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] A. Das et al. "Long-term Forecasting with EnTiDE (Engression-enhanced TiDE): Time-series Dense Encoder",
-                http://arxiv.org/abs/2304.08424
-        .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------

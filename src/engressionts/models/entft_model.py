@@ -707,9 +707,7 @@ class EnTFTModel(MixedCovariatesTorchModel):
         use_static_covariates: bool = True,
         **kwargs,
     ):
-        """Temporal Fusion Transformers (EnTFT (Engression-enhanced TFT)) for Interpretable Time Series Forecasting.
-
-        This is an implementation of the EnTFT (Engression-enhanced TFT) architecture, as outlined in [1]_.
+        """EnTFT: Engression-enhanced Temporal Fusion Transformers.
 
         The internal sub models are adopted from `pytorch-forecasting's TemporalFusionTransformer
         <https://pytorch-forecasting.readthedocs.io/en/latest/models.html>`__ implementation.
@@ -717,6 +715,8 @@ class EnTFTModel(MixedCovariatesTorchModel):
         This model supports past covariates (known for `input_chunk_length` points before prediction time),
         future covariates (known for `output_chunk_length` points after prediction time), static covariates,
         as well as probabilistic forecasting.
+
+        Many parameters follow from the standard Darts library.
 
         The EnTFT (Engression-enhanced TFT) applies multi-head attention queries on future inputs from mandatory ``future_covariates``.
         Specifying future encoders with ``add_encoders`` (read below) can automatically generate future covariates
@@ -946,13 +946,6 @@ class EnTFTModel(MixedCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] https://arxiv.org/pdf/1912.09363.pdf
-        .. [2] Shazeer, Noam, "GLU Variants Improve EnTransformer (Engression-enhanced Transformer)", 2020. arVix https://arxiv.org/abs/2002.05202.
-        .. [3] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------

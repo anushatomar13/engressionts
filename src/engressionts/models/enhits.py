@@ -510,18 +510,15 @@ class EnHiTSModel(PastCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """An implementation of the N-HiTS model, as presented in [1]_.
-
-        N-HiTS is similar to EnBEATS (Engression-enhanced N-BEATS) (implemented in :class:`NBEATSModel`),
-        but attempts to provide better performance at lower computational cost by introducing
-        multi-rate sampling of the inputs and multi-scale interpolation of the outputs.
+        """EnHiTS: Engression-enhanced High-resolution Time Series Forecasting.
 
         Similar to :class:`NBEATSModel`, in addition to the univariate version presented in the paper,
         this implementation also supports multivariate series (and covariates) by flattening the model inputs
         to a 1-D series and reshaping the outputs to a tensor of appropriate dimensions. Furthermore, it also
-        supports producing probabilistic forecasts (by specifying a `likelihood` parameter).
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time).
+
+        Many parameters follow from the standard Darts library.
 
         The multi-rate sampling is done via MaxPooling, which is controlled by ``pooling_kernel_sizes``.
         This parameter can be a tuple of tuples, of size (num_stacks x num_blocks), specifying the kernel
@@ -731,13 +728,6 @@ class EnHiTSModel(PastCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] C. Challu et al. "N-HiTS: Neural Hierarchical Interpolation for Time Series Forecasting",
-               https://arxiv.org/abs/2201.12886
-        .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------

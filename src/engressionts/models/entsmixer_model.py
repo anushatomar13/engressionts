@@ -567,15 +567,16 @@ class EnTSMixerModel(MixedCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ) -> None:
-        """Time-Series Mixer (EnTSMixer (Engression-enhanced TSMixer)): An All-MLP Architecture for Time Series.
+        """EnTSMixer: Engression-enhanced Time-Series Mixer.
 
-        This is an implementation of the EnTSMixer (Engression-enhanced TSMixer) architecture, as outlined in [1]_. A major part of the architecture
         was adopted from `this PyTorch implementation <https://github.com/ditschuk/pytorch-tsmixer>`__. Additional
         changes were applied to increase model performance and efficiency.
 
         EnTSMixer (Engression-enhanced TSMixer) forecasts time series data by integrating historical time series data, future known inputs, and static
         contextual information. It uses a combination of conditional feature mixing and mixer layers to process and
         combine these different types of data for effective forecasting.
+
+        Many parameters follow from the standard Darts library.
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time), future
         covariates (known for `output_chunk_length` points after prediction time), static covariates, as well as
@@ -776,12 +777,6 @@ class EnTSMixerModel(MixedCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] https://arxiv.org/abs/2303.06053
-        .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------

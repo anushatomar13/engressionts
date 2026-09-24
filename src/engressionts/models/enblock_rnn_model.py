@@ -311,12 +311,14 @@ class EnBlockRNNModel(MixedCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """Block Recurrent Neural Network Model (RNNs).
+        """EnBlockRNN: Engression-enhanced Block Recurrent Neural Network.
 
         This is a neural network model that uses an EnRNN (Engression-enhanced RNN) encoder to encode fixed-length input chunks, and
         a fully connected network to produce fixed-length outputs.
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time).
+
+        Many parameters follow from the standard Darts library.
 
         This class provides three variants of RNNs:
 
@@ -516,11 +518,6 @@ class EnBlockRNNModel(MixedCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------

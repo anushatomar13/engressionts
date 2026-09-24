@@ -574,16 +574,15 @@ class EnBEATSModel(PastCovariatesTorchModel):
         num_samples: int = 20,
         **kwargs,
     ):
-        """Neural Basis Expansion Analysis Time Series Forecasting (EnBEATS (Engression-enhanced N-BEATS)).
-
-        This is an implementation of the EnBEATS (Engression-enhanced N-BEATS) architecture, as outlined in [1]_.
+        """EnBEATS: Engression-enhanced Neural Basis Expansion Analysis Time Series Forecasting.
 
         In addition to the univariate version presented in the paper, our implementation also
         supports multivariate series (and covariates) by flattening the model inputs to a 1-D series
         and reshaping the outputs to a tensor of appropriate dimensions. Furthermore, it also
-        supports producing probabilistic forecasts (by specifying a `likelihood` parameter).
 
         This model supports past covariates (known for `input_chunk_length` points before prediction time).
+
+        Many parameters follow from the standard Darts library.
 
         Parameters
         ----------
@@ -786,12 +785,6 @@ class EnBEATSModel(PastCovariatesTorchModel):
               ``{"freeze": ["param.name.patterns.*"]}``
 
             Default: ``None``.
-
-        References
-        ----------
-        .. [1] https://openreview.net/forum?id=r1ecqn4YwB
-        .. [2] T. Kim et al. "Reversible Instance Normalization for Accurate Time-Series Forecasting against
-                Distribution Shift", https://openreview.net/forum?id=cGDAkQo1C0p
 
         Examples
         --------
