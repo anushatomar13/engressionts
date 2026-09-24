@@ -45,8 +45,7 @@ pip install -e .
 
 ## Documentation & Tutorials
 
-* **Official Website**: [To be updated]
-* **Official Documentation**: [engressionts.readthedocs.io](https://engressionts.readthedocs.io/)
+* **Official Documentation Website**: [To be updated]
 * **Tutorial Notebook**: [Solar Energy Example Notebook (GitHub)](https://github.com/anushatomar13/engressionts/blob/main/examples/engts-example-usage-solar.ipynb)
 
 ---
