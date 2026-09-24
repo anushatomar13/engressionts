@@ -1,0 +1,65 @@
+/* Custom UI Enhancements for engressionts Documentation */
+
+/* 1. Header Gradient & Text Styling */
+h1 {
+  background: linear-gradient(135deg, #0d9488 0%, #0284c7 50%, #6366f1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+[data-theme="dark"] h1 {
+  background: linear-gradient(135deg, #2dd4bf 0%, #38bdf8 50%, #818cf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+h2, h3 {
+  color: var(--color-brand-primary);
+  font-weight: 700;
+}
+
+/* 2. Custom Admonition Callout Boxes */
+.admonition {
+  border-left: 4px solid var(--color-brand-primary) !important;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* 3. Refined Code Blocks */
+.highlight {
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+}
+
+/* 4. Sidebar Link Transitions & Active Accent */
+.sidebar-tree .reference {
+  transition: all 0.2s ease;
+  border-radius: 6px;
+  padding-left: 0.5rem;
+}
+
+.sidebar-tree .reference:hover {
+  transform: translateX(3px);
+  background-color: rgba(13, 148, 136, 0.08);
+}
+
+[data-theme="dark"] .sidebar-tree .reference:hover {
+  background-color: rgba(45, 212, 191, 0.12);
+}
+
+/* 5. Smooth Copy Button Micro-Interaction */
+button.copybutton {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  border-radius: 6px;
+}
+
+button.copybutton:hover {
+  transform: scale(1.08);
+}
+
+/* 6. Body & Theme Switch Smoothness */
+body {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}

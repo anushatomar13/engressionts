@@ -4,12 +4,37 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "engressionts"
-version = "0.1.0"
+version = "0.1.2"
 description = "A probabilistic time-series forecasting package combining Darts and Engression."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.9"
 authors = [
-    { name = "Anusha Tomar" }
+    { name = "Anusha Tomar" },
+    { name = "Rajdeep Pathak" },
+    { name = "Tanujit Chakraborty" }
+]
+keywords = [
+    "time-series",
+    "forecasting",
+    "probabilistic-forecasting",
+    "engression",
+    "darts",
+    "pytorch",
+    "deep-learning"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: OS Independent",
 ]
 dependencies = [
     "torch>=2.0.0",
@@ -24,3 +49,20 @@ dev = [
     "black",
     "ruff"
 ]
+docs = [
+    "sphinx>=7.0.0",
+    "furo",
+    "myst-parser",
+    "sphinx-autodoc-typehints",
+    "sphinx-copybutton",
+    "sphinx-autobuild"
+]
+
+[project.urls]
+Homepage = "https://github.com/anushatomar13/engressionts"
+Documentation = "https://engressionts.readthedocs.io/"
+Repository = "https://github.com/anushatomar13/engressionts"
+"Bug Tracker" = "https://github.com/anushatomar13/engressionts/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
