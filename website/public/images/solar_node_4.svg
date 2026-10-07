@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" width="100%" height="auto" style="background:#09090b; border-radius: 12px; border: 1px solid #27272a;">
+  <!-- Title -->
+  <text x="60" y="32" fill="#f4f4f5" font-size="15" font-weight="bold" font-family="sans-serif">Node 4 (Solar Array Delta) - Actual vs Probabilistic Forecast</text>
+  <text x="60" y="48" fill="#a1a1aa" font-size="11" font-family="sans-serif">Solar Power Generation (kW) - Sample trajectory quantile prediction interval (10% - 90%)</text>
+  
+  <!-- Grid -->
+  <line x1="60" y1="310.0" x2="760" y2="310.0" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="50" y="314" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="end">10</text><line x1="60" y1="248.8" x2="760" y2="248.8" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="50" y="252.75" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="end">30</text><line x1="60" y1="187.5" x2="760" y2="187.5" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="50" y="191.5" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="end">50</text><line x1="60" y1="126.3" x2="760" y2="126.3" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="50" y="130.25" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="end">70</text><line x1="60" y1="65.0" x2="760" y2="65.0" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="50" y="69" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="end">90</text>
+  <line x1="60.0" y1="65" x2="60.0" y2="310" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="60.0" y="330" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="middle">t=0</text><line x1="188.4" y1="65" x2="188.4" y2="310" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="188.4" y="330" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="middle">t=20</text><line x1="316.9" y1="65" x2="316.9" y2="310" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="316.9" y="330" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="middle">t=40</text><line x1="445.3" y1="65" x2="445.3" y2="310" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="445.3" y="330" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="middle">t=60</text><line x1="573.8" y1="65" x2="573.8" y2="310" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="573.8" y="330" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="middle">t=80</text><line x1="702.2" y1="65" x2="702.2" y2="310" stroke="#27272a" stroke-dasharray="3,3" stroke-width="1" /><text x="702.2" y="330" fill="#a1a1aa" font-size="11" font-family="sans-serif" text-anchor="middle">t=100</text>
+  
+  <!-- Quantile Shade -->
+  <path d="M 573.8,246.5 L 573.8,246.5 L 580.2,250.7 L 586.6,252.4 L 593.0,258.9 L 599.4,262.2 L 605.9,253.7 L 612.3,240.2 L 618.7,233.5 L 625.1,230.0 L 631.6,215.8 L 638.0,188.9 L 644.4,163.9 L 650.8,150.6 L 657.2,141.8 L 663.7,128.5 L 670.1,116.4 L 676.5,116.0 L 682.9,123.4 L 689.4,124.9 L 695.8,119.5 L 702.2,121.2 L 708.6,137.2 L 715.0,156.5 L 721.5,167.0 L 727.9,172.9 L 734.3,184.3 L 740.7,198.2 L 747.2,202.8 L 753.6,198.6 L 760.0,199.7 L 760.0,262.3 L 753.6,260.1 L 747.2,263.2 L 740.7,257.5 L 734.3,242.5 L 727.9,230.0 L 721.5,223.0 L 715.0,211.3 L 708.6,191.0 L 702.2,173.9 L 695.8,171.1 L 689.4,175.4 L 682.9,172.7 L 676.5,164.3 L 670.1,163.6 L 663.7,174.5 L 657.2,186.8 L 650.8,194.5 L 644.4,206.6 L 638.0,230.6 L 631.6,256.4 L 625.1,269.5 L 618.7,271.8 L 612.3,277.5 L 605.9,289.9 L 599.4,297.2 L 593.0,292.8 L 586.6,285.2 L 580.2,282.5 L 573.8,277.2 Z" fill="#a855f7" fill-opacity="0.25" />
+  
+  <!-- Historical Train Actual -->
+  <path d="M 60.0,190.6L 66.4,173.3L 72.8,168.2L 79.3,168.9L 85.7,163.1L 92.1,153.1L 98.5,151.8L 105.0,160.9L 111.4,167.6L 117.8,165.3L 124.2,164.1L 130.6,173.6L 137.1,186.5L 143.5,190.8L 149.9,189.4L 156.3,195.4L 162.8,210.5L 169.2,222.0L 175.6,224.0L 182.0,226.9L 188.4,239.8L 194.9,254.8L 201.3,259.5L 207.7,256.7L 214.1,258.9L 220.6,266.7L 227.0,267.2L 233.4,254.8L 239.8,240.3L 246.2,233.2L 252.7,226.3L 259.1,208.5L 265.5,184.6L 271.9,168.5L 278.3,161.9L 284.8,153.0L 291.2,137.6L 297.6,127.3L 304.0,131.3L 310.5,141.6L 316.9,146.4L 323.3,149.4L 329.7,162.7L 336.1,185.7L 342.6,204.5L 349.0,213.6L 355.4,223.2L 361.8,241.0L 368.3,258.0L 374.7,262.4L 381.1,258.6L 387.5,259.7L 393.9,265.6L 400.4,263.9L 406.8,250.9L 413.2,238.5L 419.6,235.5L 426.1,233.7L 432.5,222.2L 438.9,206.3L 445.3,199.0L 451.7,199.7L 458.2,195.3L 464.6,182.0L 471.0,171.5L 477.4,171.6L 483.9,173.2L 490.3,165.7L 496.7,154.7L 503.1,153.1L 509.5,160.4L 516.0,163.7L 522.4,159.9L 528.8,161.2L 535.2,175.0L 541.7,191.8L 548.1,200.6L 554.5,206.6L 560.9,221.8L 567.3,243.7" fill="none" stroke="#38bdf8" stroke-width="2.2" />
+  
+  <!-- Test Actual (Dashed) -->
+  <path d="M 567.3,243.7L 573.8,258.4L 580.2,262.0L 586.6,265.9L 593.0,276.4L 599.4,283.4L 605.9,276.3L 612.3,261.6L 618.7,251.8L 625.1,245.9L 631.6,231.6L 638.0,207.3L 644.4,186.3L 650.8,176.5L 657.2,168.7L 663.7,153.7L 670.1,138.7L 676.5,136.1L 682.9,143.7L 689.4,148.1L 695.8,146.9L 702.2,151.8L 708.6,168.4L 715.0,185.6L 721.5,193.1L 727.9,197.1L 734.3,209.2L 740.7,226.3L 747.2,235.1L 753.6,233.8L 760.0,235.0" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4,4" />
+  
+  <!-- Forecast Median -->
+  <path d="M 573.8,261.9L 580.2,266.6L 586.6,268.8L 593.0,275.9L 599.4,279.7L 605.9,271.8L 612.3,258.9L 618.7,252.6L 625.1,249.7L 631.6,236.1L 638.0,209.7L 644.4,185.3L 650.8,172.5L 657.2,164.3L 663.7,151.5L 670.1,140.0L 676.5,140.2L 682.9,148.0L 689.4,150.1L 695.8,145.3L 702.2,147.6L 708.6,164.1L 715.0,183.9L 721.5,195.0L 727.9,201.4L 734.3,213.4L 740.7,227.8L 747.2,233.0L 753.6,229.4L 760.0,231.0" fill="none" stroke="#a855f7" stroke-width="2.5" />
+  
+  <!-- Legend -->
+  <g transform="translate(280, 20)">
+    <rect width="380" height="30" rx="6" fill="#18181b" stroke="#27272a" stroke-width="1" />
+    
+    <line x1="12" y1="15" x2="28" y2="15" stroke="#38bdf8" stroke-width="2.5" />
+    <text x="34" y="19" fill="#e4e4e7" font-size="11" font-family="sans-serif">Actual (Train)</text>
+    
+    <line x1="115" y1="15" x2="131" y2="15" stroke="#94a3b8" stroke-width="2" stroke-dasharray="3,3" />
+    <text x="137" y="19" fill="#e4e4e7" font-size="11" font-family="sans-serif">Actual (Test)</text>
+    
+    <line x1="220" y1="15" x2="236" y2="15" stroke="#a855f7" stroke-width="2.5" />
+    <text x="242" y="19" fill="#e4e4e7" font-size="11" font-family="sans-serif">Forecast</text>
+    
+    <rect x="325" y="9" width="12" height="12" rx="2" fill="#a855f7" fill-opacity="0.4" />
+    <text x="341" y="19" fill="#e4e4e7" font-size="11" font-family="sans-serif">10-90% CI</text>
+  </g>
+</svg>
