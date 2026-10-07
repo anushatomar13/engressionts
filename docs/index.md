@@ -34,7 +34,7 @@ model = EnBEATSModel(
     output_chunk_length=12,
     noise_std=1.0,
     noise_type="gaussian",
-    num_samples=20,
+    num_samples_train=2,
     n_epochs=50,
 )
 
